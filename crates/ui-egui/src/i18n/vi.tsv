@@ -2488,3 +2488,32 @@
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Tài liệu bạn đang sửa vẫn giữ tên và ngày giờ; chỉ tệp được lưu là bỏ chúng đi.
 	Trust Center	Trung tâm tin cậy
 	Word 2003 XML Document (*.xml)	Tài liệu XML Word 2003 (*.xml)
+
+# Strings added on main after this catalog was drafted (merge of main)
+	Column width	Độ rộng cột
+	Croatian	Tiếng Croatia
+	Edit Document	Sửa tài liệu
+	Envelope #10	Phong bì số 10
+	Envelope DL	Phong bì DL
+	Full\nScreen	Toàn\nmàn hình
+	Full Screen	Toàn màn hình
+	Go to what:	Đi tới:
+	Language Preferences…	Tùy chọn ngôn ngữ…
+	Reading Mode	Chế độ đọc
+	Researcher needs an online service; WordCraft keeps your documents offline.	Trình nghiên cứu cần một dịch vụ trực tuyến; WordCraft giữ tài liệu của bạn ngoại tuyến.
+	Set Proofing Language…	Đặt ngôn ngữ soát lỗi…
+	Suggested	Đề xuất
+	Text size	Cỡ chữ
+	These settings will be used for new documents.	Các thiết đặt này sẽ được dùng cho tài liệu mới.
+	Type +2 or -1 to move from the page you are on.	Nhập +2 hoặc -1 để di chuyển từ trang hiện tại.
+	Type Character Code	Nhập mã ký tự
+	Use the browser's full screen (F11)	Dùng chế độ toàn màn hình của trình duyệt (F11)
+	can't split at the first row	không thể tách ở hàng đầu tiên
+	select two or more cells to merge	hãy chọn hai ô trở lên để phối
+	there is no ink to replay	không có nét mực nào để phát lại
+	there's no citation after the caret	không có trích dẫn nào sau dấu nháy
+	this item is already at the top level	mục này đã ở cấp cao nhất
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	{name}   {height} × {width} in	{name}   {height} × {width} in
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
