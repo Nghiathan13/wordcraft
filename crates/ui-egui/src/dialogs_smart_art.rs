@@ -264,9 +264,15 @@ pub fn items_without(g: &SmartArtSpec, i: usize) -> Value {
     json!({"items": items})
 }
 
-/// The Text Pane button on the left edge of the selected graphic's frame, as in Word.
+/// The Text Pane button on the left edge of the selected graphic's frame, as in Word, while
+/// the pane is closed.
 pub fn frame_button(app: &mut WordApp, ctx: &egui::Context, layout: &wordcraft_layout::DocLayout, pages: &[Rect], scale: f32, clip: Rect) {
+    // The pane goes with the graphic: it opens again only on request.
     if wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session).is_none() {
+        app.session.view.smart_art_pane = false;
+        return;
+    }
+    if app.session.view.smart_art_pane {
         return;
     }
     let Some((hit, _)) = crate::objects::active(app, layout) else { return };
@@ -277,11 +283,10 @@ pub fn frame_button(app: &mut WordApp, ctx: &egui::Context, layout: &wordcraft_l
         return;
     }
     let t = Tokens::get(ctx);
-    let open = app.session.view.smart_art_pane;
     egui::Area::new(egui::Id::new("smart_art_frame_button")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.border)).corner_radius(4).inner_margin(2).show(ui, |ui| {
             if crate::widgets::icon_button(ui, "textPane", tl!("Text Pane")).clicked() {
-                let _ = app.run("smartArt.textPane", json!({"value": !open}));
+                let _ = app.run("smartArt.textPane", json!({"value": true}));
             }
         });
     });
