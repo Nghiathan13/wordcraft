@@ -264,6 +264,29 @@ pub fn items_without(g: &SmartArtSpec, i: usize) -> Value {
     json!({"items": items})
 }
 
+/// The Text Pane button on the left edge of the selected graphic's frame, as in Word.
+pub fn frame_button(app: &mut WordApp, ctx: &egui::Context, layout: &wordcraft_layout::DocLayout, pages: &[Rect], scale: f32, clip: Rect) {
+    if wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session).is_none() {
+        return;
+    }
+    let Some((hit, _)) = crate::objects::active(app, layout) else { return };
+    let Some(page) = pages.get(hit.page) else { return };
+    let frame = crate::frame::to_screen(*page, scale, hit.rect);
+    let at = pos2(frame.min.x - 28.0, frame.center().y - 14.0);
+    if !clip.contains(at) {
+        return;
+    }
+    let t = Tokens::get(ctx);
+    let open = app.session.view.smart_art_pane;
+    egui::Area::new(egui::Id::new("smart_art_frame_button")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
+        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.border)).corner_radius(4).inner_margin(2).show(ui, |ui| {
+            if crate::widgets::icon_button(ui, "textPane", tl!("Text Pane")).clicked() {
+                let _ = app.run("smartArt.textPane", json!({"value": !open}));
+            }
+        });
+    });
+}
+
 /// Text typed with a SmartArt graphic selected goes at the end of its current item (the first,
 /// before any is picked), and the Text Pane opens, as Word does; it never replaces the graphic.
 /// False when no graphic is selected.
