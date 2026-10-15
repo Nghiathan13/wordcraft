@@ -264,6 +264,24 @@ pub fn items_without(g: &SmartArtSpec, i: usize) -> Value {
     json!({"items": items})
 }
 
+/// Text typed with a SmartArt graphic selected goes at the end of its current item (the first,
+/// before any is picked), and the Text Pane opens, as Word does; it never replaces the graphic.
+/// False when no graphic is selected.
+pub fn type_into(app: &mut WordApp, typed: &str) -> bool {
+    let Some(g) = wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session) else { return false };
+    let Some(i) = app.smart_art_item.filter(|i| *i < g.items.len()).or((!g.items.is_empty()).then_some(0)) else { return true };
+    let text = g.items.get(i).map_or(String::new(), |it| it.text.clone()) + typed;
+    if app.smart_art_typing == Some(i) {
+        app.session.join_next_undo();
+    }
+    if app.run("smartArt.items", items_with(&g, i, &text)).is_ok() {
+        app.smart_art_item = Some(i);
+        app.smart_art_typing = Some(i);
+    }
+    let _ = app.run("smartArt.textPane", json!({"value": true}));
+    true
+}
+
 /// The Text Pane: a row per item, indented by level. Typing changes the graphic as you go (one
 /// undo step per item typed in); Enter adds an item after the current one.
 pub fn text_pane(app: &mut WordApp, ui: &mut Ui) {
