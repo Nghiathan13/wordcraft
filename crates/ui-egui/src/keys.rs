@@ -371,6 +371,9 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
                     }
                     continue;
                 }
+                if crate::dialogs_smart_art::key(app, key, modifiers) {
+                    continue;
+                }
                 if crate::objects::key(app, key, modifiers) {
                     continue;
                 }

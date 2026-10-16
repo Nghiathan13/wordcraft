@@ -267,9 +267,11 @@ pub fn items_without(g: &SmartArtSpec, i: usize) -> Value {
 /// The Text Pane button on the left edge of the selected graphic's frame, as in Word, while
 /// the pane is closed.
 pub fn frame_button(app: &mut WordApp, ctx: &egui::Context, layout: &wordcraft_layout::DocLayout, pages: &[Rect], scale: f32, clip: Rect) {
-    // The pane goes with the graphic: it opens again only on request.
+    // The pane and the picked item go with the graphic: the pane opens again only on request.
     if wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session).is_none() {
         app.session.view.smart_art_pane = false;
+        app.smart_art_item = None;
+        app.smart_art_typing = None;
         return;
     }
     if app.session.view.smart_art_pane {
@@ -290,6 +292,83 @@ pub fn frame_button(app: &mut WordApp, ctx: &egui::Context, layout: &wordcraft_l
             }
         });
     });
+}
+
+/// The item of the selected SmartArt graphic whose shape is under screen point `at`.
+fn item_under(app: &WordApp, layout: &wordcraft_layout::DocLayout, pages: &[Rect], scale: f32, at: egui::Pos2) -> Option<usize> {
+    let g = wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session)?;
+    let (hit, _) = crate::objects::active(app, layout)?;
+    let frame = crate::frame::to_screen(*pages.get(hit.page)?, scale, hit.rect);
+    if !(frame.width() > 0.0 && frame.height() > 0.0) {
+        return None;
+    }
+    // Into the graphic's own points: turned back and unflipped.
+    let p = crate::frame::turn(at, frame.center(), -hit.spin.deg);
+    let (mut u, mut v) = ((p.x - frame.min.x) / frame.width(), (p.y - frame.min.y) / frame.height());
+    if hit.spin.flip_h {
+        u = 1.0 - u;
+    }
+    if hit.spin.flip_v {
+        v = 1.0 - v;
+    }
+    wordcraft_engine::cmd::smart_art::item_at_point(&g, hit.rect.w, hit.rect.h, u * hit.rect.w, v * hit.rect.h)
+}
+
+/// A click on the selected SmartArt graphic picks the item whose shape is under the pointer (none
+/// on its background), as clicking a shape in Word does: typing then goes into that item.
+pub fn pick_item(app: &mut WordApp, layout: &wordcraft_layout::DocLayout, pages: &[Rect], scale: f32, at: egui::Pos2) {
+    if wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session).is_none() {
+        return;
+    }
+    let item = item_under(app, layout, pages, scale, at);
+    if item != app.smart_art_item {
+        app.smart_art_typing = None;
+    }
+    app.smart_art_item = item;
+}
+
+/// The picked item's shape, outlined inside the selected graphic's frame.
+pub fn paint_item(app: &WordApp, painter: &Painter, t: &Tokens, layout: &wordcraft_layout::DocLayout, pages: &[Rect], scale: f32) {
+    let Some(g) = wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session) else { return };
+    let Some(i) = app.smart_art_item else { return };
+    let Some((hit, _)) = crate::objects::active(app, layout) else { return };
+    let Some(page) = pages.get(hit.page) else { return };
+    let Some([x, y, w, h]) = wordcraft_engine::cmd::smart_art::item_box(&g, hit.rect.w, hit.rect.h, i) else { return };
+    let frame = crate::frame::to_screen(*page, scale, hit.rect);
+    let corner = |u: f32, v: f32| {
+        let u = if hit.spin.flip_h { hit.rect.w - u } else { u };
+        let v = if hit.spin.flip_v { hit.rect.h - v } else { v };
+        crate::frame::turn(pos2(frame.min.x + u * scale, frame.min.y + v * scale), frame.center(), hit.spin.deg)
+    };
+    let pts = vec![corner(x, y), corner(x + w, y), corner(x + w, y + h), corner(x, y + h)];
+    painter.add(egui::Shape::closed_line(pts, Stroke::new(1.25, t.accent)));
+}
+
+/// With an item of the selected graphic picked (clicked, or typed in): Backspace erases its last
+/// character, since typing goes at its end, and Escape goes back to the whole graphic (Delete
+/// still removes the graphic). False for other keys, or when no item is picked.
+pub fn key(app: &mut WordApp, key: egui::Key, m: egui::Modifiers) -> bool {
+    if !m.is_none() || !matches!(key, egui::Key::Backspace | egui::Key::Escape) {
+        return false;
+    }
+    let Some(g) = wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session) else { return false };
+    let Some(i) = app.smart_art_item.filter(|i| *i < g.items.len()) else { return false };
+    if key == egui::Key::Escape {
+        app.smart_art_item = None;
+        app.smart_art_typing = None;
+        return true;
+    }
+    let mut text = g.items.get(i).map_or(String::new(), |it| it.text.clone());
+    if text.pop().is_none() {
+        return true;
+    }
+    if app.smart_art_typing == Some(i) {
+        app.session.join_next_undo();
+    }
+    if app.run("smartArt.items", items_with(&g, i, &text)).is_ok() {
+        app.smart_art_typing = Some(i);
+    }
+    true
 }
 
 /// Text typed with a SmartArt graphic selected goes at the end of its current item (the first,
