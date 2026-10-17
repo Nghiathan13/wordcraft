@@ -455,6 +455,72 @@ fn snippet_blocks(
     Some(egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &px))
 }
 
+/// One character in `font` ("" = the body font), centred in `r`: laid out like document text, so
+/// symbol fonts show what the page will (Define New Bullet's current bullet, #2786).
+pub fn glyph(app: &mut WordApp, ui: &mut Ui, r: Rect, ch: &str, font: &str) {
+    let t = Tokens::get(ui.ctx());
+    let ppp = ui.ctx().pixels_per_point();
+    let key = format!("glyph:{ch}:{font}:{ppp}:{}x{}", r.width(), r.height());
+    let tex = app.previews.get_or(ui.ctx(), &key, || {
+        let chr = CharProps { font: (!font.is_empty()).then(|| font.to_string()), size: Some(r.height() * 0.7), ..CharProps::default() };
+        let mut p = Paragraph::with_text(ch, chr);
+        p.props.align = Some(wordcraft_doc::props::Align::Center);
+        p.props.space_before = Some(0.0);
+        p.props.space_after = Some(0.0);
+        snippet_blocks(&Document::new(), vec![Block::Para(p)], r.width(), r.height(), ppp, 0.0, None, false)
+    });
+    if let Some(hd) = tex {
+        let sz = hd.size_vec2() / ppp;
+        let ir = Rect::from_min_size(r.min, sz.min(r.size()));
+        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2((ir.width() / sz.x).min(1.0), (ir.height() / sz.y).min(1.0)));
+        ui.painter().with_clip_rect(r).image(hd.id(), ir, uv, preview_tint(&t, false));
+    }
+}
+
+/// Define New Bullet's preview (#2786): three short paragraphs in a list whose bullet is `ch` in
+/// `font`, aligned by `align` (`left`, `center`, `right`), laid out and drawn by the layout
+/// engine, `size` points.
+pub fn bullet_preview(app: &mut WordApp, ui: &mut Ui, ch: &str, font: &str, align: &str, size: egui::Vec2) {
+    use wordcraft_doc::numbering::{ListKind, levels_for};
+    let t = Tokens::get(ui.ctx());
+    let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter().rect(r, 3.0, preview_tint(&t, false), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    let ppp = ui.ctx().pixels_per_point();
+    let (w, h) = (size.x - 12.0, size.y - 8.0);
+    let key = format!("bullet:{ch}:{font}:{align}:{ppp}:{w}x{h}");
+    let tex = app.previews.get_or(ui.ctx(), &key, || {
+        let c = ch.chars().next().unwrap_or('•');
+        let mut levels = levels_for(ListKind::BulletChar(c));
+        let first = levels.first_mut()?;
+        first.text = c.to_string();
+        first.chr.font = (!font.is_empty()).then(|| font.to_string());
+        first.align = match align {
+            "center" => wordcraft_doc::props::Align::Center,
+            "right" => wordcraft_doc::props::Align::Right,
+            _ => wordcraft_doc::props::Align::Left,
+        };
+        let mut base = Document::new();
+        let num = base.numbering.try_add_levels(None, levels).ok()?;
+        let blocks = ["Seven lanterns hung above the harbour wall.", "The keeper lit them one by one.", "Boats came home across the bay."]
+            .into_iter()
+            .map(|text| {
+                let mut p = Paragraph::with_text(text, CharProps { size: Some(10.0), ..CharProps::default() });
+                p.props.numbering = Some(wordcraft_doc::props::NumRef { num, level: 0 });
+                p.props.space_before = Some(0.0);
+                p.props.space_after = Some(4.0);
+                Block::Para(p)
+            })
+            .collect();
+        snippet_blocks(&base, blocks, w, h, ppp, 6.0, None, false)
+    });
+    if let Some(hd) = tex {
+        let sz = hd.size_vec2() / ppp;
+        let ir = Rect::from_min_size(pos2(r.min.x + 2.0, r.min.y + 2.0), sz.min(r.size() - vec2(4.0, 4.0)));
+        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2((ir.width() / sz.x).min(1.0), (ir.height() / sz.y).min(1.0)));
+        ui.painter().with_clip_rect(r).image(hd.id(), ir, uv, preview_tint(&t, false));
+    }
+}
+
 /// Manage Styles' preview of one style (`ty`: the `styles.manage` type), `size` points wide and
 /// tall: a line of sample text, or a small table for a table style.
 pub fn style_preview(app: &mut WordApp, ui: &mut Ui, id: &str, ty: &str, size: egui::Vec2) {
