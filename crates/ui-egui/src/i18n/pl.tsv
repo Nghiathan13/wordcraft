@@ -185,6 +185,12 @@
 	Default	Domyślne
 	Define New Bullet	Zdefiniuj nowy punktor
 	Define New Number Format	Zdefiniuj nowy format numeracji
+	Define New Number Format…	Zdefiniuj nowy format numeracji…
+	Number style:	Styl numeru:
+	Number format:	Format numeru:
+	%1 is the number	%1 to numer
+	Put %1 where the number goes	Wstaw %1 w miejscu numeru
+	(the text's font)	(czcionka tekstu)
 	Delete	Usuń
 	Delete Cells	Usuń komórki
 	Delete Columns	Usuń kolumny

@@ -184,6 +184,12 @@
 	Default Paragraph Font	Alapértelmezett bekezdésbetűtípus
 	Define New Bullet	Új felsorolásjel megadása
 	Define New Number Format	Új számformátum megadása
+	Define New Number Format…	Új számformátum megadása…
+	Number style:	Számstílus:
+	Number format:	Számformátum:
+	%1 is the number	A %1 a szám
+	Put %1 where the number goes	Írja a %1 jelet oda, ahol a szám áll
+	(the text's font)	(a szöveg betűtípusa)
 	Delete	Törlés
 	Delete Cells	Cellák törlése
 	Delete Columns	Oszlopok törlése

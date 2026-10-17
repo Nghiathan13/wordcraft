@@ -342,6 +342,139 @@ fn preview(ui: &mut Ui, f: &ListForm) {
     }
 }
 
+/// Define New Number Format (Home › Paragraph › Numbering, #2787): the number style, the number
+/// format (`%1` = the number), the number's font and its alignment. OK runs one
+/// `para.defineNumber`, so agents get the same list without the dialog.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NumberForm {
+    pub format: String,
+    pub text: String,
+    pub align: String,
+    pub font: String,
+    pub bold: bool,
+    pub italic: bool,
+}
+
+impl Default for NumberForm {
+    fn default() -> NumberForm {
+        NumberForm { format: "decimal".into(), text: "%1.".into(), align: "left".into(), font: String::new(), bold: false, italic: false }
+    }
+}
+
+impl NumberForm {
+    /// The format holds the number (`%1`), no other level's, and fits (what `para.defineNumber`
+    /// accepts).
+    pub fn valid(&self) -> bool {
+        self.text.contains("%1") && !(2..=9).any(|n| self.text.contains(&format!("%{n}"))) && self.text.chars().count() <= 64
+    }
+
+    /// The `n`th label, as the list will show it.
+    fn sample(&self, n: u32) -> String {
+        self.text.replace("%1", &NumFormat::from_ooxml(&self.format).format(n))
+    }
+
+    pub fn params(&self) -> Value {
+        let font = self.font.trim();
+        json!({
+            "format": self.format,
+            "text": self.text,
+            "align": self.align,
+            "font": if font.is_empty() { Value::Null } else { json!(font) },
+            "bold": self.bold,
+            "italic": self.italic,
+        })
+    }
+}
+
+/// Number styles Define New Number Format offers: the multilevel list's, without bullet and none.
+fn number_styles() -> impl Iterator<Item = (&'static str, &'static str)> {
+    STYLES.into_iter().filter(|(k, _)| !matches!(*k, "bullet" | "none"))
+}
+
+pub fn define_number(app: &mut WordApp, ui: &mut Ui, f: &mut NumberForm) -> bool {
+    ui.label(egui::RichText::new(tl!("Number format")).font(semibold(12.5)));
+    egui::Grid::new("dnf_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
+        ui.label(tl!("Number style:"));
+        let current = number_styles().find(|(k, _)| *k == f.format).map(|(_, s)| s).unwrap_or("");
+        egui::ComboBox::from_id_salt("dnf_style").selected_text(style_label(current)).show_ui(ui, |ui| {
+            for (k, s) in number_styles() {
+                ui.selectable_value(&mut f.format, k.to_string(), style_label(s));
+            }
+        });
+        ui.end_row();
+        ui.label(tl!("Number format:"));
+        ui.text_edit_singleline(&mut f.text);
+        ui.end_row();
+        ui.label("");
+        let hint = if f.valid() { tl!("%1 is the number") } else { tl!("Put %1 where the number goes") };
+        let hint = egui::RichText::new(hint).small();
+        ui.label(if f.valid() { hint.weak() } else { hint.color(Tokens::get(ui.ctx()).red) });
+        ui.end_row();
+        ui.label(tl!("Font:"));
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut f.font).hint_text(tl!("(the text's font)")).desired_width(130.0));
+            ui.checkbox(&mut f.bold, tl!("Bold"));
+            ui.checkbox(&mut f.italic, tl!("Italic"));
+        });
+        ui.end_row();
+        ui.label(tl!("Alignment:"));
+        ui.horizontal(|ui| {
+            for (v, s) in [("left", "Left"), ("center", "Center"), ("right", "Right")] {
+                ui.radio_value(&mut f.align, v.to_string(), tl!(s));
+            }
+        });
+        ui.end_row();
+    });
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(tl!("Preview")).small().weak());
+    number_preview(ui, f);
+    let (ok, cancel) = buttons(ui, tl!("OK"));
+    // OK without a number in the format does nothing: the hint above says why.
+    if ok && f.valid() {
+        if let Err(e) = app.run("para.defineNumber", f.params()) {
+            app.status(e);
+        }
+        return true;
+    }
+    cancel
+}
+
+/// A page with three numbered paragraphs in the form's style, format, font and alignment
+/// (numbers aligned at one point, text in grey bars after them), between grey lines of text.
+fn number_preview(ui: &mut Ui, f: &NumberForm) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(300.0, 132.0), Sense::hover());
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 2.0, egui::Color32::WHITE);
+    p.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, t.border_strong), egui::StrokeKind::Inside);
+    let grey = |y: f32| {
+        let r = egui::Rect::from_min_max(egui::pos2(rect.left() + 14.0, y - 2.0), egui::pos2(rect.right() - 14.0, y + 2.0));
+        p.rect_filled(r, 1.0, egui::Color32::from_gray(205));
+    };
+    grey(rect.top() + 14.0);
+    grey(rect.bottom() - 14.0);
+    let at = rect.left() + 66.0;
+    let text_x = rect.left() + 104.0;
+    let font = if f.bold { semibold(12.0) } else { egui::FontId::proportional(12.0) };
+    for i in 0..3u32 {
+        let y = rect.top() + 40.0 + 26.0 * i as f32;
+        let mut job = egui::text::LayoutJob::default();
+        let format = egui::TextFormat { font_id: font.clone(), color: egui::Color32::BLACK, italics: f.italic, ..Default::default() };
+        job.append(&f.sample(i + 1), 0.0, format);
+        let galley = p.layout_job(job);
+        let w = galley.size().x;
+        let x = match f.align.as_str() {
+            "center" => at - w / 2.0,
+            "right" => at - w,
+            _ => at,
+        };
+        p.galley(egui::pos2(x, y - galley.size().y / 2.0), galley, egui::Color32::BLACK);
+        let bar = egui::Rect::from_min_max(egui::pos2(text_x.max(x + w + 4.0), y - 2.5), egui::pos2(rect.right() - 14.0, y + 2.5));
+        p.rect_filled(bar, 1.0, egui::Color32::from_gray(90));
+    }
+}
+
 /// Track Changes Options (Review › Tracking): what markup shows and how revisions look.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -544,6 +677,81 @@ mod tests {
 
     fn app() -> WordApp {
         WordApp::new(Session::new(wordcraft_doc::Document::new()), Services::default())
+    }
+
+    /// The Define New Number Format dialog on its own: state = (app, form, whether it closed, once
+    /// drawn). The app's fonts go in on the first frame, which draws nothing.
+    fn number_harness(a: WordApp, form: super::NumberForm) -> egui_kittest::Harness<'static, (WordApp, super::NumberForm, Option<bool>)> {
+        egui_kittest::Harness::builder().with_size(egui::vec2(480.0, 520.0)).build_ui_state(
+            |ui, st: &mut (WordApp, super::NumberForm, Option<bool>)| {
+                if ui.ctx().cumulative_pass_nr() == 0 {
+                    crate::theme::install_fonts(ui.ctx());
+                    ui.ctx().request_repaint();
+                    return;
+                }
+                // Once closed it stays closed, as in the app.
+                if st.2 != Some(true) {
+                    st.2 = Some(super::define_number(&mut st.0, ui, &mut st.1));
+                }
+            },
+            (a, form, None),
+        )
+    }
+
+    /// #2787: Define New Number Format opens from the Numbering drop-down's command without
+    /// settings; its OK numbers the paragraph with the form's style, format, alignment and font in
+    /// one step, does nothing while the format has no %1, and Cancel changes nothing.
+    #[test]
+    fn define_new_number_format_dialog_applies_only_a_valid_format() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.run("text.insert", json!({"text": "Clause"})).unwrap();
+        assert_eq!(a.run("para.defineNumber", json!({})).unwrap(), json!({"pending": "defineNumber"}));
+        let Some(Dialog::DefineNumber { form }) = &a.dialog else { panic!("dialog") };
+        assert_eq!((form.sample(1), form.sample(2)), ("1.".to_string(), "2.".to_string()));
+        a.dialog = None;
+        let doc = a.session.doc.clone();
+        // The dialog itself, clicked: state = (app, form, what the dialog returned).
+        let mut form = super::NumberForm { text: "Item".into(), ..Default::default() };
+        form.format = "lowerLetter".into();
+        let mut h = number_harness(a, form);
+        h.run();
+        assert!(h.query_by_label_contains("Put %1 where the number goes").is_some(), "the hint says what is wrong");
+        h.get_by_label("OK").click();
+        h.run();
+        assert_eq!(h.state().2, Some(false), "OK without %1 keeps the dialog open");
+        assert_eq!(h.state().0.session.doc, doc, "and changes nothing");
+        {
+            let f = &mut h.state_mut().1;
+            f.text = "(%1)".into();
+            f.align = "right".into();
+            f.bold = true;
+        }
+        h.run();
+        assert_eq!(h.state().1.sample(2), "(b)");
+        h.get_by_label("OK").click();
+        h.run();
+        let st = h.state_mut();
+        assert_eq!(st.2, Some(true), "OK closes it");
+        let got = st.0.session.run("list.get", &json!({})).unwrap();
+        let l = &got["levels"][0];
+        assert_eq!(
+            (l["format"].as_str(), l["text"].as_str(), l["align"].as_str(), l["bold"].as_bool()),
+            (Some("lowerLetter"), Some("(%1)"), Some("right"), Some(true))
+        );
+        st.0.run("edit.undo", json!({})).unwrap();
+        assert_eq!(st.0.session.doc, doc, "one undo step");
+        drop(h);
+        // Cancel: nothing happens.
+        let mut b = app();
+        b.run("text.insert", json!({"text": "Clause"})).unwrap();
+        let doc = b.session.doc.clone();
+        let mut h = number_harness(b, super::NumberForm::default());
+        h.run();
+        h.get_by_label("Cancel").click();
+        h.run();
+        assert_eq!(h.state().2, Some(true));
+        assert_eq!(h.state().0.session.doc, doc);
     }
 
     /// #328: the ribbon opens Define New Multilevel List; OK defines the list and numbers the

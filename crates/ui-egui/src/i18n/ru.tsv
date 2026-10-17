@@ -182,6 +182,12 @@
 	Default Paragraph Font	Шрифт абзаца по умолчанию
 	Define New Bullet	Определить новый маркер
 	Define New Number Format	Определить новый формат номера
+	Define New Number Format…	Определить новый формат номера…
+	Number style:	Вид нумерации:
+	Number format:	Формат номера:
+	%1 is the number	%1 — это номер
+	Put %1 where the number goes	Поставьте %1 туда, где должен быть номер
+	(the text's font)	(шрифт текста)
 	Delete	Удалить
 	Delete Cells	Удалить ячейки
 	Delete Columns	Удалить столбцы

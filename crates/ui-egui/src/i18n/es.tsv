@@ -318,6 +318,12 @@
 	Default	Predeterminado
 	Define New Bullet	Definir nueva viñeta
 	Define New Number Format	Definir nuevo formato de número
+	Define New Number Format…	Definir nuevo formato de número…
+	Number style:	Estilo de número:
+	Number format:	Formato de número:
+	%1 is the number	%1 es el número
+	Put %1 where the number goes	Ponga %1 donde va el número
+	(the text's font)	(la fuente del texto)
 	Delete	Eliminar
 	Delete Cells	Eliminar celdas
 	Delete Columns	Eliminar columnas

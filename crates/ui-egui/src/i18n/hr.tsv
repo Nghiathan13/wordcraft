@@ -607,6 +607,12 @@
 	Define New Multilevel List	Definiraj novi višerazinski popis
 	Define New Multilevel List…	Definiraj novi višerazinski popis…
 	Define New Number Format	Definiraj novi format brojeva
+	Define New Number Format…	Definiraj novi format brojeva…
+	Number style:	Stil brojeva:
+	Number format:	Format broja:
+	%1 is the number	%1 je broj
+	Put %1 where the number goes	Stavite %1 gdje dolazi broj
+	(the text's font)	(font teksta)
 	Deflate	Smanji
 	Delete	Izbriši
 	Delete Back in Equation	Izbriši unatrag u jednadžbi

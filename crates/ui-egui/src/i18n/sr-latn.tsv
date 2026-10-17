@@ -372,6 +372,12 @@
 	Default	Podrazumevano
 	Define New Bullet	Definiši novu oznaku
 	Define New Number Format	Definiši novi format broja
+	Define New Number Format…	Definiši novi format broja…
+	Number style:	Stil broja:
+	Number format:	Format broja:
+	%1 is the number	%1 je broj
+	Put %1 where the number goes	Stavite %1 tamo gde ide broj
+	(the text's font)	(font teksta)
 	Delete	Obriši
 	Delete Cells	Obriši ćelije
 	Delete Columns	Obriši kolone

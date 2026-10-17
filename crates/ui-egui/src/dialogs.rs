@@ -492,6 +492,10 @@ pub enum Dialog {
     DefineList {
         form: Box<crate::dialogs_lists::ListForm>,
     },
+    /// Home › Paragraph › Numbering › Define New Number Format (#2787).
+    DefineNumber {
+        form: Box<crate::dialogs_lists::NumberForm>,
+    },
     /// Review › Tracking › Track Changes Options (#328).
     TrackOptions {
         form: Box<crate::dialogs_lists::TrackForm>,
@@ -833,6 +837,7 @@ impl Dialog {
             Dialog::Password { .. } => "password",
             Dialog::EncryptPassword { .. } => "encryptPassword",
             Dialog::DefineList { .. } => "defineList",
+            Dialog::DefineNumber { .. } => "defineNumber",
             Dialog::TrackOptions { .. } => "trackChangesOptions",
             Dialog::Review(d) => d.name(),
             Dialog::CustomizeKeyboard { .. } => "customizeKeyboard",
@@ -1094,6 +1099,7 @@ impl Dialog {
                 return Self::report(id, &app.session.run(id, &json!({})).unwrap_or_default());
             }
             "defineList" => Dialog::DefineList { form: Box::new(crate::dialogs_lists::ListForm::read(app)) },
+            "defineNumber" => Dialog::DefineNumber { form: Box::default() },
             "trackChangesOptions" => Dialog::TrackOptions { form: Box::new(crate::dialogs_lists::TrackForm::read(app)) },
             "customizeKeyboard" => Dialog::CustomizeKeyboard { form: Box::new(crate::dialogs_keyboard::KeyboardForm::read(app)) },
             "customizeRibbon" => {
@@ -1280,6 +1286,7 @@ pub fn show(app: &mut WordApp, ctx: &egui::Context) {
         Dialog::Password { .. } => "Password",
         Dialog::EncryptPassword { .. } => "Encrypt with Password",
         Dialog::DefineList { .. } => "Define New Multilevel List",
+        Dialog::DefineNumber { .. } => "Define New Number Format",
         Dialog::TrackOptions { .. } => "Track Changes Options",
         Dialog::Review(d) => d.title(),
         Dialog::CustomizeKeyboard { .. } => "Customize Keyboard",
@@ -2580,6 +2587,7 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             cancel
         }
         Dialog::DefineList { form } => crate::dialogs_lists::define_list(app, ui, form),
+        Dialog::DefineNumber { form } => crate::dialogs_lists::define_number(app, ui, form),
         Dialog::TrackOptions { form } => crate::dialogs_lists::track_options(app, ui, form),
         Dialog::Review(d) => crate::dialogs_review::body(app, ui, d),
         Dialog::CustomizeKeyboard { form } => crate::dialogs_keyboard::customize_keyboard(app, ui, form),

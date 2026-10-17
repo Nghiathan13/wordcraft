@@ -325,6 +325,12 @@
 	Default	預設
 	Define New Bullet	定義新的項目符號
 	Define New Number Format	定義新的編號格式
+	Define New Number Format…	定義新的編號格式…
+	Number style:	編號樣式：
+	Number format:	編號格式：
+	%1 is the number	%1 代表編號
+	Put %1 where the number goes	請把 %1 放在編號的位置
+	(the text's font)	（內文字型）
 	Delete	刪除
 	Delete Cells	刪除儲存格
 	Delete Columns	刪除欄
