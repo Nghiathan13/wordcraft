@@ -850,7 +850,8 @@ fn unbalanced(nodes: &[MNode], depth: usize) -> bool {
     }
     nodes.iter().any(|n| match n {
         MNode::Delim { beg: Some(_), end: None, .. } => true,
-        MNode::Run(r) => r.text.contains('\\'),
+        // An unfinished `\name`; in normal text a backslash is just a character (`"C:\docs"`).
+        MNode::Run(r) => !r.nor && r.text.contains('\\'),
         other => (0..child_count(other)).any(|c| child(other, c).is_some_and(|a| unbalanced(a, depth + 1))),
     })
 }
@@ -1268,6 +1269,11 @@ mod tests {
         let mut eq: Arg = Vec::new();
         let p = insert_text(&mut eq, &MathPos::default(), "a/b", TypeStyle::default());
         assert_eq!(build_up(&mut eq, &p, false), Some(MathPos::new(vec![], 1)));
+        // A backslash in quotes is a character, not an unfinished `\name`.
+        let mut eq: Arg = Vec::new();
+        let p = insert_text(&mut eq, &MathPos::default(), "\"C:\\docs\"", TypeStyle::default());
+        assert!(build_up(&mut eq, &p, false).is_some());
+        assert!(matches!(&eq[..], [MNode::Run(r)] if r.nor && r.text == "C:\\docs"), "{eq:#?}");
     }
 
     #[test]
