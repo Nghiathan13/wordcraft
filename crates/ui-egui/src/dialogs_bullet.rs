@@ -78,7 +78,7 @@ impl DefineBulletForm {
         }
     }
 
-    /// The bullet's formatting as the preview draws it (the preview fits its size).
+    /// The bullet's formatting as the preview draws it (the preview sizes it with [`Self::preview_pt`]).
     pub fn chr(&self) -> wordcraft_doc::props::CharProps {
         wordcraft_doc::props::CharProps {
             font: (!self.font.is_empty()).then(|| self.font.clone()),
@@ -87,6 +87,13 @@ impl DefineBulletForm {
             color: wordcraft_doc::Rgb::parse(&self.color).map(wordcraft_doc::props::TextColor::Rgb),
             ..Default::default()
         }
+    }
+
+    /// The bullet's size in the preview, in points: its own size, or the text's (11 pt) when it
+    /// has none, kept to what the preview's rows can show (4–20 pt).
+    pub fn preview_pt(&self) -> f32 {
+        let pt = self.size.trim().parse::<f32>().ok().filter(|pt| pt.is_finite() && (1.0..=1638.0).contains(pt)).unwrap_or(11.0);
+        pt.clamp(4.0, 20.0)
     }
 
     /// The `para.defineBullet` params this form stands for.
@@ -170,7 +177,8 @@ fn preview(app: &mut WordApp, ui: &mut Ui, f: &DefineBulletForm) {
         let r = egui::Rect::from_min_max(egui::pos2(from, y - 2.0), egui::pos2(rect.right() - 8.0, y + 2.0));
         p.rect_filled(r, 1.0, egui::Color32::from_gray(gray));
     };
-    let glyph = 14.0;
+    // `previews::glyph` draws the character at 0.7 of its box: a box that gives it its size.
+    let glyph = f.preview_pt() * scale / 0.7;
     for i in 0..7 {
         let y = rect.top() + 5.0 + row * i as f32 + row / 2.0;
         if !(2..5).contains(&i) {
@@ -264,6 +272,18 @@ mod tests {
             assert!(!h.state().2, "{bad}: the dialog stays open");
             assert_eq!(level_at(&h.state().0, 0).text, before.text, "{bad}: the list is unchanged");
         }
+    }
+
+    /// #2786 review: the preview draws the bullet at its own size, the text's when it has none,
+    /// within what the rows can show.
+    #[test]
+    fn the_preview_draws_the_bullets_size() {
+        let at = |size: &str| DefineBulletForm { size: size.into(), ..DefineBulletForm::plain("•") }.preview_pt();
+        assert_eq!(at(""), 11.0);
+        assert_eq!(at("16"), 16.0);
+        assert!(at("8") < at("11") && at("11") < at("18"));
+        assert_eq!(at("72"), 20.0, "kept to the rows");
+        assert_eq!(at("abc"), 11.0);
     }
 
     /// Symbol… hands the form to the Symbol dialog, whose OK brings it back with the character
