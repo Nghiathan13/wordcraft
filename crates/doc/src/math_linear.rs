@@ -39,7 +39,7 @@ pub fn parse(s: &str) -> Arg {
     }
     let mut out = clean(out);
     // `expr#(n)`: a numbered equation.
-    if out.iter().any(|n| matches!(n, MNode::Run(r) if r.text.contains('#'))) {
+    if out.iter().any(|n| matches!(n, MNode::Run(r) if !r.nor && r.text.contains('#'))) {
         out = vec![MNode::EqArr { rows: vec![out] }];
     }
     out
@@ -359,7 +359,7 @@ impl P {
                     _ => Vec::new(),
                 };
                 let mut e = self.operand(stops);
-                if let Some(k) = e.iter().position(|n| matches!(n, MNode::Run(r) if r.text == "&")) {
+                if let Some(k) = e.iter().position(|n| matches!(n, MNode::Run(r) if !r.nor && r.text == "&")) {
                     let rest = e.split_off(k + 1);
                     e.pop();
                     deg = e;
@@ -531,8 +531,13 @@ impl P {
                 if stops.contains(&c) || is_boundary(c) || self.tired() {
                     break;
                 }
+                let at = self.i;
                 let a = self.atom(stops);
                 if a.is_empty() {
+                    // An empty `""` is nothing, and the operand goes on.
+                    if self.i > at {
+                        continue;
+                    }
                     break;
                 }
                 out.extend(a);
@@ -622,7 +627,7 @@ impl P {
                     other => vec![other],
                 }
             }
-            Some(c) if is_prefix(c) || closer(c).is_some() => self.atom(stops),
+            Some(c) if is_prefix(c) || closer(c).is_some() || c == '"' => self.atom(stops),
             Some(c) if c.is_ascii_digit() => {
                 let start = self.i;
                 while self.peek().is_some_and(|k| k.is_ascii_digit() || k == '.') {
@@ -696,8 +701,8 @@ fn grid(matrix: bool, inner: Arg) -> MNode {
     let mut rows: Vec<Vec<Arg>> = vec![vec![Vec::new()]];
     for n in inner {
         match &n {
-            MNode::Run(r) if r.text == "@" => rows.push(vec![Vec::new()]),
-            MNode::Run(r) if r.text == "&" && matrix => {
+            MNode::Run(r) if !r.nor && r.text == "@" => rows.push(vec![Vec::new()]),
+            MNode::Run(r) if !r.nor && r.text == "&" && matrix => {
                 if let Some(row) = rows.last_mut() {
                     row.push(Vec::new());
                 }

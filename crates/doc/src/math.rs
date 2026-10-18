@@ -865,6 +865,17 @@ mod tests {
         assert_eq!(parse_linear("a\"\"b"), vec![run("ab")]);
         // An unclosed quote is a character; its spaces are build-up spaces.
         assert_eq!(parse_linear("\"a b"), vec![run("\"ab")]);
+        // Quoted text is never syntax: not a number mark, not a cell or row separator.
+        assert_eq!(parse_linear("\"#\""), vec![normal("#")]);
+        let n = parse_linear("■(\"&\"&b@\"@\"&d)");
+        let MNode::Matrix { rows, .. } = &n[0] else { panic!("{n:#?}") };
+        assert_eq!(rows.len(), 2, "{rows:#?}");
+        assert_eq!(rows[0][0], vec![normal("&")]);
+        assert_eq!(rows[1][0], vec![normal("@")]);
+        // A script or an operand can be quoted text, and `""` doesn't end an operand.
+        let sup = MNode::Script { kind: ScriptKind::Sup, base: vec![run("x")], sub: Vec::new(), sup: vec![normal("a b")] };
+        assert_eq!(parse_linear("x^\"a b\""), vec![sup]);
+        assert_eq!(parse_linear("a/\"\"b"), vec![MNode::Frac { kind: FracKind::Bar, num: vec![run("a")], den: vec![run("b")] }]);
     }
 
     #[test]
