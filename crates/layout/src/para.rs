@@ -764,8 +764,8 @@ const MISSING_ROMAN_FONT: &str = "Cambria";
 /// The family to look `font` up as. A font that isn't installed is drawn, as Word draws it
 /// (measured in Word 2024, #2702):
 /// 1. in the alternate the font table names for it (`w:altName`), when that one can be drawn:
-///    installed, or a font whose own substitutes we know. That comes before the family class: a
-///    roman font with an installed alternate is drawn in the alternate;
+///    installed, or a font one of whose own substitutes is installed. That comes before the
+///    family class: a roman font with an installed alternate is drawn in the alternate;
 /// 2. in [`MISSING_ROMAN_FONT`] when the font table classes it as roman, unless it is a Thai
 ///    font (drawn in a Thai face, #1549) or a symbol font;
 /// 3. else as `font`, which [`wordcraft_fonts::word::resolve`] substitutes.
@@ -782,7 +782,8 @@ fn lookup_family<'f>(doc: &'f Document, font: &'f str) -> &'f str {
         return font;
     }
     // Calibri has no list of its own because the generic sans list is its (Carlito first).
-    let drawable = |f: &&str| !f.is_empty() && (installed(f) || wordcraft_fonts::word::has_own_substitutes(f) || f.eq_ignore_ascii_case("Calibri"));
+    let drawable =
+        |f: &&str| !f.is_empty() && (installed(f) || wordcraft_fonts::word::has_installed_substitute(f) || f.eq_ignore_ascii_case("Calibri"));
     if let Some(alt) = alternate.and_then(|a| a.split(',').map(str::trim).find(drawable)) {
         return alt;
     }

@@ -2832,6 +2832,20 @@ fn font_alt_names_are_read_from_the_font_table() {
     assert_eq!(d.settings.roman_fonts, ["Brand Serif"]);
 }
 
+/// The font table's two lists have limits of their own: a roman font listed after thousands of
+/// other fonts is still read as roman.
+#[test]
+fn a_roman_font_after_many_other_fonts_is_still_read() {
+    let plain: String = (0..2500).map(|i| format!(r#"<w:font w:name="Plain {i}"><w:family w:val="swiss"/></w:font>"#)).collect();
+    let fonts = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">{plain}<w:font w:name="Brand Serif"><w:altName w:val="Georgia"/><w:family w:val="roman"/></w:font></w:fonts>"#
+    );
+    let rels = [("rId9", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable", "fontTable.xml")];
+    let d = wordcraft_docx::read(&docx("<w:p/>", &rels, &[("word/fontTable.xml", &fonts)])).unwrap();
+    assert_eq!(d.settings.roman_fonts, ["Brand Serif"]);
+    assert_eq!(d.settings.font_alt_names, [("Brand Serif".to_string(), "Georgia".to_string())]);
+}
+
 /// `w:doNotUseHTMLParagraphAutoSpacing` in the settings' `w:compat`: paragraph spacing adds up.
 #[test]
 fn html_auto_spacing_off_is_read_and_kept() {
