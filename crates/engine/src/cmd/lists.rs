@@ -99,6 +99,18 @@ pub fn define_number(s: &mut Session, v: &Value) -> CmdResult {
     if v.get("align").is_some() && !matches!(p::str(v, "align"), Some("left" | "center" | "right")) {
         return bad("align must be left, center or right");
     }
+    // The number's font: a wrong type is an error, not a setting quietly left out.
+    if v.get("font").is_some_and(|x| !x.is_null() && !x.is_string()) {
+        return bad("font must be a font name or null");
+    }
+    if ["bold", "italic"].iter().any(|k| v.get(*k).is_some_and(|x| !x.is_boolean())) {
+        return bad("bold and italic must be true or false");
+    }
+    match v.get("color") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(c)) if Rgb::parse(c).is_some() => {}
+        _ => return bad("color must be RRGGBB or null"),
+    }
     let mut levels = levels_for(ListKind::Numbered);
     // The number's formatting from the Font dialog, in `format.set`'s shape (size, underline…).
     let props: Option<wordcraft_doc::props::CharProps> = match v.get("props") {
@@ -640,6 +652,11 @@ mod tests {
             json!({"format": 3}),
             json!({"align": "middle"}),
             json!({"align": null}),
+            json!({"font": 3}),
+            json!({"bold": "yes"}),
+            json!({"italic": 1}),
+            json!({"color": "red"}),
+            json!({"color": 5}),
         ] {
             assert!(s.run("para.defineNumber", &junk).is_err(), "{junk}");
             assert_eq!(s.doc, doc, "{junk} changes nothing");
