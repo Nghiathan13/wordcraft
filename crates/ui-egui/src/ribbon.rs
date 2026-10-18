@@ -655,7 +655,9 @@ fn list_level_tiles(ui: &mut Ui, app: &mut WordApp) {
             // Every level above at its start value, as the Define dialogs' previews show it.
             let label = Counters::default().next_label(&doc.numbering, n.num, k).map(|(s, _)| s).filter(|s| !s.trim().is_empty());
             let at = (def.indent - def.hanging).max(0.0);
-            (label, def.chr.clone(), def.align, at, def.indent.max(0.0), def.suffix)
+            // The label fits its tile whatever size the level gives it.
+            let chr = wordcraft_doc::CharProps { size: None, ..def.chr.clone() };
+            (label, chr, def.align, at, def.indent.max(0.0), def.suffix)
         })
         .collect();
     let enabled = crate::widgets::enabled(app, "para.listLevel");
