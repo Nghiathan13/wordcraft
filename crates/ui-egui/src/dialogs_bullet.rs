@@ -78,9 +78,10 @@ impl DefineBulletForm {
         }
     }
 
-    /// The bullet's formatting as the preview draws it (the preview fits its size).
+    /// The bullet's formatting as the preview draws it, at [`Self::preview_pt`].
     pub fn chr(&self) -> wordcraft_doc::props::CharProps {
         wordcraft_doc::props::CharProps {
+            size: Some(self.preview_pt()),
             font: (!self.font.is_empty()).then(|| self.font.clone()),
             bold: self.bold.then_some(true),
             italic: self.italic.then_some(true),
@@ -89,11 +90,23 @@ impl DefineBulletForm {
         }
     }
 
+    /// The bullet's size in the preview, in points: its own size, or the text's (11 pt) when it
+    /// has none, kept to what the preview's rows can show (4–20 pt).
+    pub fn preview_pt(&self) -> f32 {
+        let pt = self.size.trim().parse::<f32>().ok().filter(|pt| pt.is_finite() && (1.0..=1638.0).contains(pt)).unwrap_or(11.0);
+        pt.clamp(4.0, 20.0)
+    }
+
     /// The `para.defineBullet` params this form stands for.
     pub fn params(&self) -> serde_json::Value {
         let mut v = json!({"char": self.ch, "font": self.font, "align": self.align, "bold": self.bold, "italic": self.italic});
-        if let Some(pt) = self.size.trim().parse::<f64>().ok().filter(|pt| (1.0..=1638.0).contains(pt)) {
-            v["size"] = json!(pt);
+        // No size is the text's size; anything else goes to the command, which rejects a bad one.
+        let size = self.size.trim();
+        if !size.is_empty() {
+            v["size"] = match size.parse::<f64>() {
+                Ok(pt) if pt.is_finite() => json!(pt),
+                _ => json!(size),
+            };
         }
         v["color"] = json!(if wordcraft_doc::Rgb::parse(&self.color).is_some() { self.color.as_str() } else { "auto" });
         v
@@ -137,8 +150,10 @@ pub fn body(app: &mut WordApp, ui: &mut Ui, f: &mut DefineBulletForm) -> bool {
     preview(app, ui, f);
     ui.add_space(6.0);
     let (ok, cancel) = crate::dialogs_insert::buttons(ui, "OK", "Cancel", f.ch.chars().count() == 1);
-    if ok {
-        let _ = app.run("para.defineBullet", f.params());
+    if ok && let Err(e) = app.run("para.defineBullet", f.params()) {
+        // A bad setting (a size out of range…) keeps the dialog open to correct it.
+        app.status(e);
+        return false;
     }
     ok || cancel
 }
@@ -163,7 +178,9 @@ fn preview(app: &mut WordApp, ui: &mut Ui, f: &DefineBulletForm) {
         let r = egui::Rect::from_min_max(egui::pos2(from, y - 2.0), egui::pos2(rect.right() - 8.0, y + 2.0));
         p.rect_filled(r, 1.0, egui::Color32::from_gray(gray));
     };
-    let glyph = 14.0;
+    // Room for the character at its size (`previews::glyph` draws it at `chr`'s size).
+    let chr = wordcraft_doc::props::CharProps { size: Some(f.preview_pt() * scale), ..f.chr() };
+    let glyph = f.preview_pt() * scale / 0.7;
     for i in 0..7 {
         let y = rect.top() + 5.0 + row * i as f32 + row / 2.0;
         if !(2..5).contains(&i) {
@@ -176,7 +193,7 @@ fn preview(app: &mut WordApp, ui: &mut Ui, f: &DefineBulletForm) {
             _ => aligned_at,
         };
         let r = egui::Rect::from_min_size(egui::pos2(x, y - glyph / 2.0), vec2(glyph, glyph));
-        crate::previews::glyph(app, ui, r, &f.ch, &f.chr(), egui::Color32::WHITE);
+        crate::previews::glyph(app, ui, r, &f.ch, &chr, egui::Color32::WHITE);
         bar(y, text_at.max(r.right() + 2.0), 120);
     }
 }
@@ -232,6 +249,46 @@ mod tests {
         h.run_steps(2);
         let l = level_at(&h.state().0, 0);
         assert_eq!((l.text.as_str(), l.chr.font.as_deref(), l.align), ("†", Some("Segoe UI Symbol"), Align::Right));
+    }
+
+    /// #2786 review: a size the command rejects (not a number, out of range) is an error OK
+    /// reports, keeping the dialog open and the list as it was; no size is the text's size.
+    #[test]
+    fn ok_with_a_bad_size_keeps_the_dialog_open() {
+        assert!(DefineBulletForm::plain("†").params().get("size").is_none(), "no size: the text's size");
+        for bad in ["abc", "5000", "0"] {
+            let app = app_with_bullet();
+            let before = level_at(&app, 0);
+            let form = DefineBulletForm { size: bad.into(), ..DefineBulletForm::plain("†") };
+            let mut h = egui_kittest::Harness::builder().with_size(vec2(500.0, 500.0)).build_ui_state(
+                |ui, (app, f, closed): &mut (WordApp, DefineBulletForm, bool)| {
+                    if fonts_ready(ui) && body(app, ui, f) {
+                        *closed = true;
+                    }
+                },
+                (app, form, false),
+            );
+            h.run_steps(2);
+            h.get_by_label("OK").click();
+            h.run_steps(2);
+            assert!(!h.state().2, "{bad}: the dialog stays open");
+            assert_eq!(level_at(&h.state().0, 0).text, before.text, "{bad}: the list is unchanged");
+        }
+    }
+
+    /// #2786 review: the preview draws the bullet at its own size, the text's when it has none,
+    /// within what the rows can show.
+    #[test]
+    fn the_preview_draws_the_bullets_size() {
+        let at = |size: &str| DefineBulletForm { size: size.into(), ..DefineBulletForm::plain("•") }.preview_pt();
+        assert_eq!(at(""), 11.0);
+        assert_eq!(at("16"), 16.0);
+        assert!(at("8") < at("11") && at("11") < at("18"));
+        assert_eq!(at("72"), 20.0, "kept to the rows");
+        assert_eq!(at("abc"), 11.0);
+        // The preview draws the character with these props: `previews::glyph` keeps their size.
+        let f = DefineBulletForm { size: "16".into(), ..DefineBulletForm::plain("•") };
+        assert_eq!(f.chr().size, Some(16.0));
     }
 
     /// Symbol… hands the form to the Symbol dialog, whose OK brings it back with the character
