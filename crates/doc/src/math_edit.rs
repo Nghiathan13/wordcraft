@@ -817,7 +817,19 @@ fn plain(n: &MNode) -> bool {
         MNode::Run(r) => !r.nor && !r.lit && r.scr == MScr::Roman && r.color.is_none() && r.size.is_none() && r.font.is_none(),
         // Arrays and matrices are finished pieces; typing after them builds up on its own.
         MNode::EqArr { .. } | MNode::Matrix { .. } => false,
-        _ => true,
+        other => !has_quoted_normal(other, 0),
+    }
+}
+
+/// Normal text with a literal `"` somewhere inside: `"…"` can't carry it, so build-up leaves the
+/// structure as it is (#2581).
+fn has_quoted_normal(n: &MNode, depth: usize) -> bool {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    match n {
+        MNode::Run(r) => r.nor && r.text.contains('"'),
+        other => (0..child_count(other)).any(|c| child(other, c).is_some_and(|a| a.iter().any(|m| has_quoted_normal(m, depth + 1)))),
     }
 }
 
@@ -1266,6 +1278,18 @@ mod tests {
         build_up(&mut eq, &p, false).unwrap();
         let MNode::Frac { num, .. } = &eq[0] else { panic!("{eq:#?}") };
         assert!(matches!(&num[..], [MNode::Run(r)] if r.nor && r.text == "Net sales"), "{eq:#?}");
+        assert!(matches!(eq.last(), Some(MNode::Script { .. })), "{eq:#?}");
+        // Normal text with literal quotes (typed with Normal Text on) can't be written as `"…"`:
+        // the fraction is left alone, and what follows still builds up.
+        let quoted = MNode::Run(MRun { text: "a\"\"b".into(), nor: true, sty: Some(MSty::Plain), ..Default::default() });
+        let mut eq = parse_linear("n/2");
+        if let Some(MNode::Frac { num, .. }) = eq.get_mut(0) {
+            *num = vec![quoted.clone()];
+        }
+        let p = insert_text(&mut eq, &MathPos::new(vec![], 1), "+x^2", TypeStyle::default());
+        build_up(&mut eq, &p, false).unwrap();
+        let MNode::Frac { num, .. } = &eq[0] else { panic!("{eq:#?}") };
+        assert_eq!(num, &vec![quoted], "{eq:#?}");
         assert!(matches!(eq.last(), Some(MNode::Script { .. })), "{eq:#?}");
     }
 
