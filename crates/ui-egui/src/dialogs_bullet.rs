@@ -92,8 +92,13 @@ impl DefineBulletForm {
     /// The `para.defineBullet` params this form stands for.
     pub fn params(&self) -> serde_json::Value {
         let mut v = json!({"char": self.ch, "font": self.font, "align": self.align, "bold": self.bold, "italic": self.italic});
-        if let Some(pt) = self.size.trim().parse::<f64>().ok().filter(|pt| (1.0..=1638.0).contains(pt)) {
-            v["size"] = json!(pt);
+        // No size is the text's size; anything else goes to the command, which rejects a bad one.
+        let size = self.size.trim();
+        if !size.is_empty() {
+            v["size"] = match size.parse::<f64>() {
+                Ok(pt) if pt.is_finite() => json!(pt),
+                _ => json!(size),
+            };
         }
         v["color"] = json!(if wordcraft_doc::Rgb::parse(&self.color).is_some() { self.color.as_str() } else { "auto" });
         v
@@ -137,8 +142,10 @@ pub fn body(app: &mut WordApp, ui: &mut Ui, f: &mut DefineBulletForm) -> bool {
     preview(app, ui, f);
     ui.add_space(6.0);
     let (ok, cancel) = crate::dialogs_insert::buttons(ui, "OK", "Cancel", f.ch.chars().count() == 1);
-    if ok {
-        let _ = app.run("para.defineBullet", f.params());
+    if ok && let Err(e) = app.run("para.defineBullet", f.params()) {
+        // A bad setting (a size out of range…) keeps the dialog open to correct it.
+        app.status(e);
+        return false;
     }
     ok || cancel
 }
@@ -232,6 +239,31 @@ mod tests {
         h.run_steps(2);
         let l = level_at(&h.state().0, 0);
         assert_eq!((l.text.as_str(), l.chr.font.as_deref(), l.align), ("†", Some("Segoe UI Symbol"), Align::Right));
+    }
+
+    /// #2786 review: a size the command rejects (not a number, out of range) is an error OK
+    /// reports, keeping the dialog open and the list as it was; no size is the text's size.
+    #[test]
+    fn ok_with_a_bad_size_keeps_the_dialog_open() {
+        assert!(DefineBulletForm::plain("†").params().get("size").is_none(), "no size: the text's size");
+        for bad in ["abc", "5000", "0"] {
+            let app = app_with_bullet();
+            let before = level_at(&app, 0);
+            let form = DefineBulletForm { size: bad.into(), ..DefineBulletForm::plain("†") };
+            let mut h = egui_kittest::Harness::builder().with_size(vec2(500.0, 500.0)).build_ui_state(
+                |ui, (app, f, closed): &mut (WordApp, DefineBulletForm, bool)| {
+                    if fonts_ready(ui) && body(app, ui, f) {
+                        *closed = true;
+                    }
+                },
+                (app, form, false),
+            );
+            h.run_steps(2);
+            h.get_by_label("OK").click();
+            h.run_steps(2);
+            assert!(!h.state().2, "{bad}: the dialog stays open");
+            assert_eq!(level_at(&h.state().0, 0).text, before.text, "{bad}: the list is unchanged");
+        }
     }
 
     /// Symbol… hands the form to the Symbol dialog, whose OK brings it back with the character
