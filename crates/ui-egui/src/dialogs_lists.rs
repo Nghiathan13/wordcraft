@@ -444,7 +444,8 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
     let t = Tokens::get(ui.ctx());
     let width = 230.0;
     if f.format == "none" || !f.text.contains("%1") {
-        ui.add(egui::TextEdit::singleline(&mut f.text).char_limit(64).desired_width(width));
+        let h = ui.spacing().interact_size.y;
+        ui.add(egui::TextEdit::singleline(&mut f.text).char_limit(64).desired_width(width).min_size(vec2(0.0, h)));
         return;
     }
     let (mut before, mut after) = f.text.split_once("%1").map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
@@ -454,14 +455,16 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
     let cursor =
         |ui: &Ui, id: egui::Id| egui::text_edit::TextEditState::load(ui.ctx(), id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0);
     let mut remove = false;
+    // As tall as the Number style box beside it: a field's height less the frame's margin and border.
+    let row = (ui.spacing().interact_size.y - 6.0).max(12.0);
     egui::Frame::new()
         .fill(t.input)
         .stroke(egui::Stroke::new(1.0, t.input_border))
         .corner_radius(3.0)
         .inner_margin(egui::Margin { left: 2, right: 4, top: 2, bottom: 2 })
         .show(ui, |ui| {
-            ui.set_width(width - 8.0);
-            ui.horizontal(|ui| {
+            ui.allocate_ui_with_layout(vec2(width - 8.0, row), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.set_min_size(vec2(width - 8.0, row));
                 ui.spacing_mut().item_spacing.x = 1.0;
                 let id = ui.id().with("dnf_before");
                 let before_id = id;
@@ -480,7 +483,7 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
                     remove = true;
                 }
                 let sample = NumFormat::from_ooxml(&f.format).format(1);
-                let (rect, num) = ui.allocate_exact_size(vec2(measure(ui, &sample) + 8.0, ui.spacing().interact_size.y - 4.0), Sense::click());
+                let (rect, num) = ui.allocate_exact_size(vec2(measure(ui, &sample) + 8.0, row), Sense::click());
                 num.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Number")));
                 if num.clicked() {
                     num.request_focus();
