@@ -732,11 +732,13 @@ fn define_bullet(s: &mut Session, v: &Value) -> CmdResult {
         Some("right") => Some(wordcraft_doc::props::Align::Right),
         _ => return Err(CmdError::Params("align must be left, center or right".into())),
     };
+    // A paragraph's level, from its own numbering or its style's (List Bullet 2 numbers its
+    // paragraphs at level 2 without any of their own).
+    let styles = s.doc.styles.clone();
+    let level_of = |pp: &wordcraft_doc::props::ParaProps| styles.resolve_para(pp).numbering.filter(|n| n.num != 0).map_or(0, |n| n.level);
     let story = s.sel.focus.story;
-    let used: std::collections::BTreeSet<u8> = super::selected_paths(s)
-        .iter()
-        .map(|p| s.doc.para(story, p).and_then(|x| x.props.numbering).filter(|n| n.num != 0).map_or(0, |n| n.level))
-        .collect();
+    let used: std::collections::BTreeSet<u8> =
+        super::selected_paths(s).iter().filter_map(|p| s.doc.para(story, p)).map(|x| level_of(&x.props)).collect();
     let mut levels = wordcraft_doc::numbering::levels_for(wordcraft_doc::numbering::ListKind::BulletChar(ch));
     for l in used {
         if let Some(lv) = levels.get_mut(usize::from(l)) {
@@ -761,7 +763,7 @@ fn define_bullet(s: &mut Session, v: &Value) -> CmdResult {
     }
     let num = s.doc.numbering.try_add_levels(None, levels)?;
     super::para::fmt(s, &|pp| {
-        let level = pp.numbering.filter(|n| n.num != 0).map_or(0, |n| n.level);
+        let level = level_of(pp);
         pp.numbering = Some(NumRef { num, level });
         pp.indent_left = None;
         pp.indent_first = None;

@@ -898,10 +898,9 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
                     mi(ui, app, "None", "para.bullets", json!({"off": true}));
                     ui.separator();
                     // #2786: Change List Level › and Define New Bullet….
-                    // Change List Level is for a paragraph already in a list.
-                    let doc = &app.session.doc;
-                    let in_list =
-                        doc.para_at(&app.session.sel.focus).and_then(|p| doc.styles.resolve_para(&p.props).numbering).is_some_and(|n| n.num != 0);
+                    // Change List Level is for a paragraph in a list of its own numbering, the one
+                    // `para.listLevel` changes (a style's numbering it leaves alone).
+                    let in_list = app.session.doc.para_at(&app.session.sel.focus).and_then(|p| p.props.numbering).is_some_and(|n| n.num != 0);
                     ui.add_enabled_ui(in_list, |ui| {
                         ui.menu_button(tl!("Change List Level"), |ui| {
                             for level in 0..9u8 {

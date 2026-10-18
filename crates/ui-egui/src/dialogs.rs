@@ -1656,11 +1656,15 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ui.label(job);
             let (ok, cancel) = buttons(ui, tl!("OK"));
             if (ok || cancel)
-                && let Dialog::Font { bullet, font, size, bold, italic, color, .. } = d
+                && let Dialog::Font { bullet, font, font_was, size, bold, italic, color, .. } = d
                 && let Some(mut form) = bullet.take()
             {
                 if ok {
-                    form.font = font.trim().to_string();
+                    // The stored (English) name, as `apply_font` stores it, and only when the
+                    // user changed it: a bullet in the text's font keeps following the text.
+                    if font.trim() != font_was.trim() {
+                        form.font = app.previews.font_stored(font.trim());
+                    }
                     form.size = size.trim().to_string();
                     form.bold = *bold;
                     form.italic = *italic;
@@ -4257,6 +4261,38 @@ mod tests {
         assert_ne!(text.size, Some(16.0), "the text isn't formatted");
         let (f, _) = back(false);
         assert_eq!((f.font.as_str(), f.size.as_str(), f.bold), ("Arial", "", false), "Cancel keeps the form");
+        // A bullet in the text's font (no font of its own) keeps it when OK doesn't change the
+        // font box, though the box shows the text's font (review of #2860).
+        let mut app = app_with("Example");
+        let _ = app.run("para.bullets", json!({"kind": "▪"}));
+        let Some(mut d) = font_for_bullet(&mut app, DefineBulletForm::plain("▪")) else { panic!("the Font dialog opens") };
+        if let Dialog::Font { font, .. } = &d {
+            assert!(!font.is_empty(), "the box shows the text's font");
+        }
+        if let Dialog::Font { bullet: Some(b), font, font_was, .. } = &mut d {
+            assert_eq!(font, font_was);
+            assert!(b.font.is_empty());
+        }
+        app.dialog = Some(d);
+        let mut fonts = false;
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1440.0, 900.0)).build_ui_state(
+            move |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                if fonts {
+                    show(app, &ctx);
+                } else {
+                    crate::theme::install_fonts_for(&ctx, false);
+                    fonts = true;
+                }
+            },
+            app,
+        );
+        h.run_steps(3);
+        h.get_by_label("OK").click();
+        h.run_steps(3);
+        let Some(Dialog::Insert(d)) = h.state_mut().dialog.take() else { panic!("back to Define New Bullet") };
+        let InsertDialog::DefineBullet(f) = *d else { panic!("back to Define New Bullet") };
+        assert_eq!(f.font, "", "still the text's font");
     }
 
     /// A dialog was pinned by its anchor, so dragging its title bar did nothing (#732).

@@ -5027,6 +5027,17 @@ fn define_bullet_gives_the_selection_a_bullet_of_its_own() {
     // The Font dialog's size, bold and colour reach the bullet too.
     assert_eq!((l.chr.size, l.chr.bold), (Some(14.0), Some(true)));
     assert_eq!(l.chr.color, wordcraft_doc::props::TextColor::parse("C00000"));
+    // A paragraph numbered only by its style keeps the style's level (review of #2860).
+    let mut s2 = Session::new(wordcraft_doc::Document::from_text("Styled"));
+    let styled = s2.doc.numbering.try_add_list(wordcraft_doc::ListKind::Bullet).unwrap();
+    s2.doc.styles.get_mut("ListParagraph").unwrap().para.numbering = Some(wordcraft_doc::props::NumRef { num: styled, level: 1 });
+    s2.doc.para_mut(wordcraft_doc::StoryRef::Body, &wordcraft_doc::Path::top(0)).unwrap().props.style = Some("ListParagraph".into());
+    assert!(s2.doc.para_at(&Pos::body(0, 0)).unwrap().props.numbering.is_none(), "no numbering of its own");
+    s2.sel = crate::Selection::caret(Pos::body(0, 0));
+    run(&mut s2, "para.defineBullet", json!({"char": "♦"}));
+    let n = s2.doc.para_at(&Pos::body(0, 0)).unwrap().props.numbering.unwrap();
+    assert_eq!(n.level, 1, "the style's level is kept");
+    assert_eq!(s2.doc.numbering.level(n.num, 1).unwrap().text, "♦");
     // No params: ★, as before.
     s.sel = crate::Selection::caret(Pos::body(2, 0));
     run(&mut s, "para.defineBullet", json!({}));
