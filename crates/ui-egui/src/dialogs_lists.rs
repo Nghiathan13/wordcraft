@@ -429,6 +429,13 @@ impl NumberForm {
         });
         (b("bold"), b("italic"), rgb)
     }
+
+    /// The number's size in the preview: the Font dialog's size, 12 pt without one, kept to what
+    /// the preview's rows have room for.
+    fn preview_size(&self) -> f32 {
+        let size = self.props.get("size").and_then(Value::as_f64).filter(|v| v.is_finite()).unwrap_or(12.0);
+        size.clamp(6.0, 20.0) as f32
+    }
 }
 
 /// Number styles Define New Number Format offers: the multilevel list's without bullet (none last).
@@ -578,8 +585,10 @@ pub fn define_number(app: &mut WordApp, ui: &mut Ui, f: &mut NumberForm) -> bool
         return false;
     }
     if ok && f.valid() {
+        // A refused format keeps the dialog open, with the reason in the status bar.
         if let Err(e) = app.run("para.defineNumber", f.params()) {
             app.status(e);
+            return false;
         }
         return true;
     }
@@ -604,7 +613,8 @@ fn number_preview(ui: &mut Ui, f: &NumberForm) {
     let text_x = rect.left() + 104.0;
     let (bold, italic, rgb) = f.look();
     let ink = rgb.map_or(egui::Color32::BLACK, crate::theme::c32);
-    let font = if bold { semibold(12.0) } else { egui::FontId::proportional(12.0) };
+    let size = f.preview_size();
+    let font = if bold { semibold(size) } else { egui::FontId::proportional(size) };
     for i in 0..3u32 {
         let y = rect.top() + 40.0 + 26.0 * i as f32;
         let mut job = egui::text::LayoutJob::default();
@@ -895,6 +905,13 @@ mod tests {
         assert_eq!(a.run("para.defineNumber", json!({})).unwrap(), json!({"pending": "defineNumber"}));
         let Some(Dialog::DefineNumber { form }) = &a.dialog else { panic!("dialog") };
         assert_eq!((form.sample(1), form.sample(2)), ("1.".to_string(), "2.".to_string()));
+        // The preview draws the number at the Font dialog's size, within what its rows hold.
+        let mut sized = (**form).clone();
+        assert_eq!(sized.preview_size(), 12.0);
+        for (size, want) in [(json!(16.0), 16.0), (json!(400.0), 20.0), (json!(1.0), 6.0), (json!("big"), 12.0)] {
+            sized.props.insert("size".into(), size);
+            assert_eq!(sized.preview_size(), want);
+        }
         a.dialog = None;
         let doc = a.session.doc.clone();
         // The dialog itself, clicked: state = (app, form, what the dialog returned).
