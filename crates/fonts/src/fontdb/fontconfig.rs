@@ -3,9 +3,10 @@
 //! `conf.d` (TeX Live's `/usr/share/texmf/fonts/opentype/...`), and users through
 //! `~/.config/fontconfig/fonts.conf`.
 //!
-//! Read from the documented configuration format (fonts-conf(5)): `<dir>` elements, with their
-//! `prefix` (`xdg`: the user's data folder; `relative`: the configuration file's folder) and a
-//! leading `~` for the home folder, and the files and folders `<include>` pulls in (a folder's
+//! Read from the documented configuration format (fonts-conf(5)): `<dir>` and `<remap-dir>`
+//! elements (the folder is the text; `as-path`, the path fontconfig's cache records for it, is
+//! left alone), with their `prefix` (`xdg`: the user's data folder; `relative`: the configuration
+//! file's folder) and a leading `~` for the home folder, and the files and folders `<include>` pulls in (a folder's
 //! `[0-9]*.conf` files, in name order). Everything else in the configuration is left alone.
 //! Bounded whatever the files say: how many files are read, how large and how deep includes go.
 
@@ -80,7 +81,8 @@ impl Reader<'_> {
         let here = path.parent().map(Path::to_path_buf).unwrap_or_default();
         for el in elements(&text) {
             match el.name {
-                "dir" => {
+                // A remapped folder is scanned where it is (Flatpak names the host's `~/.fonts` so).
+                "dir" | "remap-dir" => {
                     if let Some(d) = self.resolve(&el.text, el.prefix.as_deref(), &here, false)
                         && self.dirs.len() < MAX_DIRS
                         && !self.dirs.contains(&d)
@@ -164,14 +166,14 @@ fn read_capped(path: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// A `<dir>` or `<include>` element: its name, `prefix` and text.
+/// A `<dir>`, `<remap-dir>` or `<include>` element: its name, `prefix` and text.
 struct Element<'a> {
     name: &'a str,
     prefix: Option<String>,
     text: String,
 }
 
-/// The `<dir>` and `<include>` elements of a configuration file, in order. Comments,
+/// The `<dir>`, `<remap-dir>` and `<include>` elements of a configuration file, in order. Comments,
 /// declarations and processing instructions are skipped; other elements are stepped over.
 fn elements(text: &str) -> Vec<Element<'static>> {
     let mut out = Vec::new();
@@ -192,6 +194,7 @@ fn elements(text: &str) -> Vec<Element<'static>> {
         let name_end = tag.find(|c: char| c.is_whitespace() || c == '/').unwrap_or(tag.len());
         let name = match tag.get(..name_end) {
             Some("dir") => "dir",
+            Some("remap-dir") => "remap-dir",
             Some("include") => "include",
             _ => continue,
         };
@@ -256,7 +259,7 @@ mod tests {
 
     /// Folders from the main file, its `conf.d` (numbered files only, in name order) and the
     /// user's configuration, with each kind of name: absolute, `~`, `prefix="xdg"`,
-    /// `prefix="relative"`. A `<cachedir>`, a commented-out `<dir>`, a relative `<dir>` without a
+    /// `prefix="relative"`; a `<remap-dir>` names its own folder, not its `as-path`. A `<cachedir>`, a commented-out `<dir>`, a relative `<dir>` without a
     /// prefix and a repeated folder are left out; a missing include is fine.
     #[test]
     fn the_configuration_names_the_folders() {
@@ -287,6 +290,11 @@ mod tests {
         std::fs::write(etc.join("conf.d/09-early.conf"), "<fontconfig><dir prefix='relative'>../extra &amp; more</dir></fontconfig>").unwrap();
         std::fs::write(etc.join("conf.d/README"), "<fontconfig><dir>/not/a/conf/file</dir></fontconfig>").unwrap();
         std::fs::write(etc.join("conf.d/70-again.conf"), "<fontconfig><dir>/usr/share/fonts</dir></fontconfig>").unwrap();
+        std::fs::write(
+            etc.join("conf.d/80-remap.conf"),
+            r#"<fontconfig><remap-dir as-path="/home/u/.fonts">/run/host/user-fonts-legacy</remap-dir><remap-dir prefix="xdg" as-path="/x">remapped</remap-dir></fontconfig>"#,
+        )
+        .unwrap();
         std::fs::write(root.join("home/.config/fontconfig/fonts.conf"), "<fontconfig><dir>/opt/my fonts</dir></fontconfig>").unwrap();
         let got = dirs(&env(&root));
         assert_eq!(
@@ -297,6 +305,8 @@ mod tests {
                 root.join("home/.fonts"),
                 etc.join("conf.d/../extra & more"),
                 PathBuf::from("/usr/share/texmf/fonts/opentype/public/lm"),
+                PathBuf::from("/run/host/user-fonts-legacy"),
+                root.join("home/.local/share/remapped"),
                 PathBuf::from("/opt/my fonts"),
             ]
         );
