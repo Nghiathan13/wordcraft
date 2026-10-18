@@ -335,4 +335,33 @@ mod tests {
         // Nothing was inserted into the text.
         assert_eq!(h.state().0.session.doc.para_at(&wordcraft_doc::Pos::body(0, 0)).unwrap().text, "One");
     }
+
+    /// The Symbol dialog's title-bar close box goes back to Define New Bullet, as Cancel does.
+    #[test]
+    fn closing_the_symbol_dialog_returns_to_the_bullet() {
+        let mut app = app_with_bullet();
+        let form = DefineBulletForm { align: "center".into(), ..DefineBulletForm::plain("▪") };
+        let sym = SymbolForm::for_bullet(&app, form);
+        app.dialog = Some(Dialog::Insert(Box::new(InsertDialog::Symbol(sym))));
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1000.0, 800.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                if fonts_ready(ui) {
+                    let ctx = ui.ctx().clone();
+                    crate::dialogs::show(app, &ctx);
+                }
+            },
+            app,
+        );
+        h.run_steps(3);
+        h.get_by_label("Close").click();
+        h.run_steps(3);
+        let back = match h.state_mut().dialog.take() {
+            Some(Dialog::Insert(d)) => match *d {
+                InsertDialog::DefineBullet(f) => f,
+                _ => panic!("back to Define New Bullet"),
+            },
+            _ => panic!("back to Define New Bullet"),
+        };
+        assert_eq!((back.ch.as_str(), back.align.as_str()), ("▪", "center"));
+    }
 }
