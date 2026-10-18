@@ -130,6 +130,49 @@ fn unwrapped_extent(ctx: &mut Ctx, id: u32, depth: usize) -> Option<(f32, f32)> 
     Some((widest, extent(&items)))
 }
 
+/// The widest line of text box `id`'s paragraphs laid out on their own, when the box doesn't
+/// wrap its text but [`unwrapped_extent`] leaves it alone because it also holds tables or text
+/// boxes. None when the box wraps its text, runs it up, down or stacked, or is linked.
+fn mixed_unwrapped_width(ctx: &mut Ctx, id: u32, blocks: &Blocks, depth: usize) -> Option<f32> {
+    let body = ctx.doc.parts.get(&id)?.body;
+    if !body.no_wrap || body.vert != TextVert::Horz || body.next.is_some() || shown_story(ctx, id) != id {
+        return None;
+    }
+    let paras: Blocks = blocks.iter().filter(|b| matches!(&***b, Block::Para(_))).cloned().collect();
+    // Measured apart from where the text is shown: list numbers and equation numbers count once.
+    let snap = (ctx.counters.clone(), ctx.eq_count);
+    let items = layout_box(ctx, StoryRef::Part(id), &paras, &[], NO_WRAP_LEN, BoxContext::Other, depth + 1, None).items;
+    (ctx.counters, ctx.eq_count) = snap;
+    Some(
+        items
+            .iter()
+            .filter_map(|it| match it {
+                Placed::Lines { para, .. } => Some(natural_width(para)),
+                _ => None,
+            })
+            .fold(0.0f32, f32::max),
+    )
+}
+
+/// `blocks` with each paragraph's lines `room` points longer (its right indent that much less),
+/// so text that doesn't wrap runs on past the box's side while its tables keep the box's width.
+fn widen_paras(ctx: &Ctx, blocks: &Blocks, room: f32) -> Blocks {
+    blocks
+        .iter()
+        .map(|b| match &**b {
+            Block::Para(p) => {
+                let mut p = p.clone();
+                let right = ctx.doc.styles.resolve_para(&p.props).indent_right;
+                p.props.indent_right = Some(right - room);
+                p.props.indent_right_chars = None;
+                p.touch();
+                Arc::new(Block::Para(p))
+            }
+            _ => b.clone(),
+        })
+        .collect()
+}
+
 /// The size Word gives a text box that resizes to fit its text and doesn't wrap it: its widest
 /// line and its text's depth, inside its margins (#2191). None: the shape's own size.
 pub(crate) fn fitted_size(ctx: &mut Ctx, o: &InlineObject, depth: usize) -> Option<(f32, f32)> {
@@ -149,13 +192,22 @@ pub(crate) fn box_items(ctx: &mut Ctx, id: u32, rect: Rect, depth: usize) -> Vec
         Some(items) => items,
         None => {
             // Text that doesn't wrap runs on to its widest line, past the box's side if need be.
-            if let Some((widest, _)) = unwrapped_extent(ctx, id, depth) {
+            let unwrapped = unwrapped_extent(ctx, id, depth);
+            if let Some((widest, _)) = unwrapped {
                 len = len.max(widest + FIT_SLACK);
             }
             if !ctx.boxes.enter(id) {
                 return Vec::new();
             }
-            let blocks = ctx.doc.parts.get(&id).map(|p| p.blocks.clone()).unwrap_or_default();
+            let mut blocks = ctx.doc.parts.get(&id).map(|p| p.blocks.clone()).unwrap_or_default();
+            // Beside tables or text boxes the box keeps its size and its tables the box's width;
+            // only its paragraphs run on to their widest line.
+            if unwrapped.is_none()
+                && let Some(widest) = mixed_unwrapped_width(ctx, id, &blocks, depth)
+                && widest + FIT_SLACK > len
+            {
+                blocks = widen_paras(ctx, &blocks, widest + FIT_SLACK - len);
+            }
             let inner = lay(ctx, id, &blocks, len, body.vert, depth);
             ctx.boxes.leave();
             // Text that doesn't fit inside the margins is hidden, as in Word; a box that resizes

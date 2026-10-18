@@ -215,3 +215,35 @@ fn a_box_fitting_text_it_doesnt_wrap_takes_the_size_of_its_line() {
     assert!(n > 1, "the text wraps");
     assert!((frame.w - 144.0).abs() < 0.01 && (frame.h - 144.0).abs() < 0.01, "its own size: {frame:?}");
 }
+
+/// A box whose text doesn't wrap but that also holds a table keeps its own size, also when it
+/// resizes to fit its text; its paragraphs still run on one line past its side, and the table
+/// keeps the box's width (#2191 review).
+#[test]
+fn text_that_doesnt_wrap_beside_a_table_stays_on_one_line() {
+    let caption = "(Figure 1.1) A time line of the important vaccines, on one line";
+    for body in [TextBody { no_wrap: true, ..Default::default() }, TextBody { no_wrap: true, auto_fit: true, ..Default::default() }] {
+        let mut d = Document::from_text("x");
+        let id = text_box(&mut d, 0, caption, 144.0, 144.0, body);
+        if let Some(p) = d.parts.get_mut(&id) {
+            p.blocks.push(std::sync::Arc::new(Block::Table(wordcraft_doc::Table::new(1, 2, 100.0))));
+        }
+        let l = lay(&d);
+        let frame = frame_of(&l, id);
+        assert!((frame.w - 144.0).abs() < 0.01 && (frame.h - 144.0).abs() < 0.01, "its own size: {frame:?} ({body:?})");
+        let caption_lines = l.pages[0].items.iter().find_map(|it| match it {
+            Placed::Lines { story: StoryRef::Part(s), para, .. } if *s == id => Some((para.lines.len(), natural_width(para))),
+            _ => None,
+        });
+        let (n, wide) = caption_lines.unwrap();
+        assert_eq!(n, 1, "one line, past the box's side ({body:?})");
+        assert!(wide > 200.0, "{wide}");
+        let table_right = l.pages[0].items.iter().filter_map(|it| match it {
+            Placed::Rule { x0, x1, .. } => Some(x0.max(*x1)),
+            _ => None,
+        });
+        for right in table_right {
+            assert!(right <= frame.right() + 1.0, "the table stays in the box: {right} > {}", frame.right());
+        }
+    }
+}
