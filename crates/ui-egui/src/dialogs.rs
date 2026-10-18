@@ -1578,9 +1578,25 @@ pub(crate) fn number_font_dialog(app: &mut WordApp, props: &serde_json::Map<Stri
     Some(d)
 }
 
-/// The Font dialog's body, for one drawn over another dialog. True when it closes.
-pub(crate) fn number_font_body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
-    body(app, ui, d)
+/// Draws a number's Font dialog (from [`number_font_dialog`]) in the same window as every dialog,
+/// over the one that opened it: `Some(true)` on OK, `Some(false)` on Cancel, Escape or its close
+/// button, `None` while it stays open.
+pub(crate) fn show_number_font(app: &mut WordApp, ctx: &egui::Context, d: &mut Dialog) -> Option<bool> {
+    let (mut open, mut close) = (true, false);
+    egui::Window::new(tl!("Font"))
+        .id(egui::Id::new(("dialog", "Font", "number")))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, -40.0))
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.set_min_width(340.0);
+            close = body(app, ui, d);
+        });
+    if open && !close {
+        return None;
+    }
+    Some(matches!(d, Dialog::Font { for_number: Some(true), .. }))
 }
 
 /// After a number's Font dialog closed: the properties changed on OK, `None` on Cancel.

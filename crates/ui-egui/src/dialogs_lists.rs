@@ -458,14 +458,16 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
         .fill(t.input)
         .stroke(egui::Stroke::new(1.0, t.input_border))
         .corner_radius(3.0)
-        .inner_margin(egui::Margin::symmetric(4, 2))
+        .inner_margin(egui::Margin { left: 2, right: 4, top: 2, bottom: 2 })
         .show(ui, |ui| {
             ui.set_width(width - 8.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 1.0;
                 let id = ui.id().with("dnf_before");
+                let before_id = id;
                 let at = cursor(ui, id);
-                let w = measure(ui, &before).max(6.0) + 4.0;
+                // Empty, it takes no room: the number starts the box, as in Word.
+                let w = if before.is_empty() { 1.0 } else { measure(ui, &before) + 2.0 };
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut before)
                         .id(id)
@@ -483,6 +485,8 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
                 if num.clicked() {
                     num.request_focus();
                 }
+                // Left and Right are this piece's own (below), not egui's move-focus keys.
+                ui.memory_mut(|m| m.set_focus_lock_filter(num.id, egui::EventFilter { horizontal_arrows: true, ..Default::default() }));
                 let fill = if num.has_focus() { t.selection } else { t.ruler_margin };
                 ui.painter().rect_filled(rect, 2.0, fill);
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, &sample, font.clone(), t.text);
@@ -490,6 +494,14 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
                     remove = true;
                 }
                 let id = ui.id().with("dnf_after");
+                // From the number, Left or Home goes to the text before it, Right or End to after.
+                if num.has_focus() {
+                    if pressed(ui, egui::Key::ArrowLeft) || pressed(ui, egui::Key::Home) {
+                        ui.memory_mut(|m| m.request_focus(before_id));
+                    } else if pressed(ui, egui::Key::ArrowRight) || pressed(ui, egui::Key::End) {
+                        ui.memory_mut(|m| m.request_focus(id));
+                    }
+                }
                 let at = cursor(ui, id);
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut after)
@@ -511,6 +523,10 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
 }
 
 pub fn define_number(app: &mut WordApp, ui: &mut Ui, f: &mut NumberForm) -> bool {
+    // Font… open over this dialog: this one waits, as in Word.
+    if f.font_dialog.is_some() {
+        ui.disable();
+    }
     ui.label(egui::RichText::new(tl!("Number format")).font(semibold(12.5)));
     egui::Grid::new("dnf_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
         let label = ui.label(tl!("Number style:"));
@@ -535,7 +551,7 @@ pub fn define_number(app: &mut WordApp, ui: &mut Ui, f: &mut NumberForm) -> bool
         ui.end_row();
         ui.label(tl!("Alignment:"));
         ui.horizontal(|ui| {
-            for (v, s) in [("left", "Left"), ("center", "Center"), ("right", "Right")] {
+            for (v, s) in [("right", "Right"), ("center", "Center"), ("left", "Left")] {
                 ui.radio_value(&mut f.align, v.to_string(), tl!(s));
             }
         });
@@ -547,18 +563,14 @@ pub fn define_number(app: &mut WordApp, ui: &mut Ui, f: &mut NumberForm) -> bool
     let (ok, cancel) = buttons(ui, tl!("OK"));
     // While Font… is open (the app's Font dialog, over this one), Enter and Escape are its own.
     if let Some(mut d) = f.font_dialog.take() {
-        let closed = egui::Modal::new(egui::Id::new("wordcraft.defineNumber.font"))
-            .show(ui.ctx(), |ui| {
-                ui.set_min_width(340.0);
-                ui.label(egui::RichText::new(tl!("Font")).font(semibold(14.0)));
-                ui.add_space(4.0);
-                crate::dialogs::number_font_body(app, ui, &mut d)
-            })
-            .inner;
-        if !closed {
-            f.font_dialog = Some(d);
-        } else if let Some(changed) = crate::dialogs::number_font_result(app, &d) {
-            f.props.extend(changed);
+        match crate::dialogs::show_number_font(app, ui.ctx(), &mut d) {
+            None => f.font_dialog = Some(d),
+            Some(true) => {
+                if let Some(changed) = crate::dialogs::number_font_result(app, &d) {
+                    f.props.extend(changed);
+                }
+            }
+            Some(false) => {}
         }
         return false;
     }
@@ -867,6 +879,15 @@ mod tests {
         h.get_by_label("a, b, c, …").click();
         h.run();
         assert_eq!((h.state().1.format.as_str(), h.state().1.text.as_str()), ("lowerLetter", "(%1)"));
+        // From the number, Left goes to the text before it: typing lands there.
+        h.get_by_label("Number").click();
+        h.run();
+        h.key_press(egui::Key::ArrowLeft);
+        h.run();
+        h.input_mut().events.push(egui::Event::Text("x".into()));
+        h.run();
+        assert_eq!(h.state().1.text, "(x%1)");
+        h.state_mut().1.text = "(%1)".into();
         h.state_mut().1.align = "right".into();
         h.run();
         // Font… opens the app's Font dialog over this one; Enter there is its OK, the number takes
