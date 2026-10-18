@@ -683,7 +683,7 @@ pub fn specs() -> Vec<CommandSpec> {
             super::lists::define_number(s, v)
         })
         .params(
-            r#"{"format"?: "decimal|lowerLetter|upperLetter|lowerRoman|upperRoman|decimalZero|ordinal|cardinalText|…|none" (a number style, default decimal; none = no number, every label is text), "text"?: "%1." (the number format; %1 = the number, required unless none), "start"?: n, "align"?: "left|center|right", "font"?: string | null, "bold"?: bool, "italic"?: bool, "color"?: "RRGGBB" | null, "props"?: CharProps (as format.set: size, underline…)} (the number's font; the selected paragraphs get a numbered list of their own)"#,
+            r#"{"format"?: "decimal|lowerLetter|upperLetter|lowerRoman|upperRoman|decimalZero|ordinal|cardinalText|…|none" (a number style, default decimal; none = no number, every label is text), "text"?: "%1." (the number format, default "%1."; with a number style it must hold %1, the number; with none it is required and holds no %1), "start"?: n, "align"?: "left|center|right", "font"?: string | null, "bold"?: bool, "italic"?: bool, "color"?: "RRGGBB" | null, "props"?: CharProps (as format.set: size, underline…)} (the number's font; the selected paragraphs get a numbered list of their own)"#,
         ),
         CommandSpec::new("review.language", "Language", "Review › Language", language).params(
             r#"{"lang"?: "en-US|en-GB|pl-PL|fr-FR|…" (BCP 47; default en-US), "noProof"?: bool, "detect"?: bool (detect language automatically, a preference), "default"?: bool (also the document's default language)}"#,

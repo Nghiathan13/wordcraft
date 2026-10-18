@@ -379,11 +379,6 @@ impl Default for NumberForm {
 impl NumberForm {
     /// What `para.defineNumber` accepts: a number style's format holds the number (`%1`), a
     /// "none" one holds none, neither holds another level's, and it fits.
-    pub fn valid(&self) -> bool {
-        let has = self.text.contains("%1");
-        (has != (self.format == "none")) && !(2..=9).any(|n| self.text.contains(&format!("%{n}"))) && self.text.chars().count() <= 64
-    }
-
     /// The `n`th label, as the list will show it.
     fn sample(&self, n: u32) -> String {
         if self.format == "none" {
@@ -584,8 +579,9 @@ pub fn define_number(app: &mut WordApp, ui: &mut Ui, f: &mut NumberForm) -> bool
         }
         return false;
     }
-    if ok && f.valid() {
-        // A refused format keeps the dialog open, with the reason in the status bar.
+    if ok {
+        // para.defineNumber checks the format: a refused one keeps the dialog open, with the
+        // reason in the status bar.
         if let Err(e) = app.run("para.defineNumber", f.params()) {
             app.status(e);
             return false;
@@ -991,6 +987,18 @@ mod tests {
         h.run();
         let got = h.state_mut().0.session.run("list.get", &json!({})).unwrap();
         assert_eq!((got["levels"][0]["format"].as_str(), got["levels"][0]["text"].as_str()), (Some("none"), Some("Note:")));
+        drop(h);
+        // OK on a format without the number: the dialog stays open, the status bar says why.
+        let mut d = app();
+        d.run("text.insert", json!({"text": "Clause"})).unwrap();
+        let doc = d.session.doc.clone();
+        let mut h = number_harness(d, super::NumberForm { text: "Item".into(), ..Default::default() });
+        h.run();
+        h.get_by_label("OK").click();
+        h.run();
+        assert_eq!(h.state().2, Some(false), "still open");
+        assert_eq!(h.state().0.session.doc, doc);
+        assert!(h.state().0.status_msg.as_ref().is_some_and(|(m, _)| m.contains("%1")), "{:?}", h.state().0.status_msg);
         drop(h);
         // Cancel: nothing happens.
         let mut b = app();
