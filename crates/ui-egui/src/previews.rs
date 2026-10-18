@@ -456,13 +456,14 @@ fn snippet_blocks(
     Some(egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &px))
 }
 
-/// One character formatted by `chr` (its size fitted to `r`), centred in `r` and drawn with `tint`:
+/// One character formatted by `chr` (at its size, or fitted to `r` without one), centred in `r`
+/// and drawn with `tint`:
 /// laid out like document text, so symbol fonts show what the page will (Define New Bullet, #2786).
 pub fn glyph(app: &mut WordApp, ui: &mut Ui, r: Rect, ch: &str, chr: &CharProps, tint: egui::Color32) {
     let ppp = ui.ctx().pixels_per_point();
     let key = format!("glyph:{ch}:{chr:?}:{ppp}:{}x{}", r.width(), r.height());
     let tex = app.previews.get_or(ui.ctx(), &key, || {
-        let chr = CharProps { size: Some(r.height() * 0.7), ..chr.clone() };
+        let chr = CharProps { size: Some(chr.size.unwrap_or(r.height() * 0.7)), ..chr.clone() };
         let mut p = Paragraph::with_text(ch, chr);
         p.props.align = Some(wordcraft_doc::props::Align::Center);
         p.props.space_before = Some(0.0);

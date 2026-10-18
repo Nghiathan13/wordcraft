@@ -78,9 +78,10 @@ impl DefineBulletForm {
         }
     }
 
-    /// The bullet's formatting as the preview draws it (the preview sizes it with [`Self::preview_pt`]).
+    /// The bullet's formatting as the preview draws it, at [`Self::preview_pt`].
     pub fn chr(&self) -> wordcraft_doc::props::CharProps {
         wordcraft_doc::props::CharProps {
+            size: Some(self.preview_pt()),
             font: (!self.font.is_empty()).then(|| self.font.clone()),
             bold: self.bold.then_some(true),
             italic: self.italic.then_some(true),
@@ -177,7 +178,8 @@ fn preview(app: &mut WordApp, ui: &mut Ui, f: &DefineBulletForm) {
         let r = egui::Rect::from_min_max(egui::pos2(from, y - 2.0), egui::pos2(rect.right() - 8.0, y + 2.0));
         p.rect_filled(r, 1.0, egui::Color32::from_gray(gray));
     };
-    // `previews::glyph` draws the character at 0.7 of its box: a box that gives it its size.
+    // Room for the character at its size (`previews::glyph` draws it at `chr`'s size).
+    let chr = wordcraft_doc::props::CharProps { size: Some(f.preview_pt() * scale), ..f.chr() };
     let glyph = f.preview_pt() * scale / 0.7;
     for i in 0..7 {
         let y = rect.top() + 5.0 + row * i as f32 + row / 2.0;
@@ -191,7 +193,7 @@ fn preview(app: &mut WordApp, ui: &mut Ui, f: &DefineBulletForm) {
             _ => aligned_at,
         };
         let r = egui::Rect::from_min_size(egui::pos2(x, y - glyph / 2.0), vec2(glyph, glyph));
-        crate::previews::glyph(app, ui, r, &f.ch, &f.chr(), egui::Color32::WHITE);
+        crate::previews::glyph(app, ui, r, &f.ch, &chr, egui::Color32::WHITE);
         bar(y, text_at.max(r.right() + 2.0), 120);
     }
 }
@@ -284,6 +286,9 @@ mod tests {
         assert!(at("8") < at("11") && at("11") < at("18"));
         assert_eq!(at("72"), 20.0, "kept to the rows");
         assert_eq!(at("abc"), 11.0);
+        // The preview draws the character with these props: `previews::glyph` keeps their size.
+        let f = DefineBulletForm { size: "16".into(), ..DefineBulletForm::plain("•") };
+        assert_eq!(f.chr().size, Some(16.0));
     }
 
     /// Symbol… hands the form to the Symbol dialog, whose OK brings it back with the character
