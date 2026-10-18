@@ -603,7 +603,7 @@ pub fn specs() -> Vec<CommandSpec> {
         })
         .params(r#"{"value": n}"#),
         CommandSpec::new("para.defineBullet", "Define New Bullet", "Home › Paragraph › Bullets", define_bullet).params(
-            r#"{"char"?: one character (default ★), "font"?: family (the bullet's own font; "" = the text's), "align"?: "left|center|right"} (the selected paragraphs get a list of their own; each keeps its level)"#,
+            r#"{"char"?: one character (default ★), "font"?: family (the bullet's own font; "" = the text's), "size"?: pt, "bold"?: bool, "italic"?: bool, "color"?: "RRGGBB" | "auto", "align"?: "left|center|right"} (the selected paragraphs get a list of their own; each keeps its level)"#,
         ),
         CommandSpec::new("para.defineNumber", "Define New Number Format", "Home › Paragraph › Numbering", |s, v| {
             let fmt = wordcraft_doc::section::NumFormat::from_ooxml(p::str(v, "format").unwrap_or("decimal"));
@@ -678,7 +678,8 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// Define New Bullet (#2786): the selected paragraphs go into a list of their own whose bullet is
-/// `char`, drawn in `font` and aligned by `align` at every level they use. A list of its own, so
+/// `char`, drawn in `font` (with `size`, `bold`, `italic` and `color` when given) and aligned by
+/// `align` at every level they use. A list of its own, so
 /// no other list using the same character changes, and it never toggles a bullet off the way
 /// `para.bullets` does. Each paragraph keeps its level (level 1 when it wasn't in a list).
 fn define_bullet(s: &mut Session, v: &Value) -> CmdResult {
@@ -703,6 +704,27 @@ fn define_bullet(s: &mut Session, v: &Value) -> CmdResult {
             (!f.is_empty()).then(|| f.to_string())
         }
     };
+    let size = match v.get("size") {
+        None => None,
+        Some(n) => match n.as_f64() {
+            Some(pt) if (1.0..=1638.0).contains(&pt) => Some(pt as f32),
+            _ => return Err(CmdError::Params("size must be 1 to 1638 points".into())),
+        },
+    };
+    let flag = |k: &str| -> Result<Option<bool>, CmdError> {
+        match v.get(k) {
+            None => Ok(None),
+            Some(b) => b.as_bool().map(Some).ok_or_else(|| CmdError::Params(format!("{k} must be true or false"))),
+        }
+    };
+    let (bold, italic) = (flag("bold")?, flag("italic")?);
+    let color = match v.get("color") {
+        None => None,
+        Some(c) => {
+            let c = c.as_str().ok_or_else(|| CmdError::Params("color must be RRGGBB or auto".into()))?;
+            Some(wordcraft_doc::props::TextColor::parse(c).ok_or_else(|| CmdError::Params("color must be RRGGBB or auto".into()))?)
+        }
+    };
     let align = match p::str(v, "align") {
         None if v.get("align").is_none() => None,
         Some("left") => Some(wordcraft_doc::props::Align::Left),
@@ -720,6 +742,18 @@ fn define_bullet(s: &mut Session, v: &Value) -> CmdResult {
         if let Some(lv) = levels.get_mut(usize::from(l)) {
             lv.text = ch.to_string();
             lv.chr.font = font.clone();
+            if size.is_some() {
+                lv.chr.size = size;
+            }
+            if bold.is_some() {
+                lv.chr.bold = bold;
+            }
+            if italic.is_some() {
+                lv.chr.italic = italic;
+            }
+            if color.is_some() {
+                lv.chr.color = color;
+            }
             if let Some(a) = align {
                 lv.align = a;
             }

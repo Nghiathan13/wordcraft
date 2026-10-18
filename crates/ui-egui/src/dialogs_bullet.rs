@@ -1,5 +1,5 @@
 //! Define New Bullet (Home › Paragraph › Bullets, #2786): the bullet character (picked in the
-//! Symbol dialog), its font and its alignment, with a preview laid out by the layout engine. It
+//! Symbol dialog), its font (in the app's Font dialog) and its alignment, with a preview. It
 //! ends in one command, `para.defineBullet`, so agents get the same result without the dialog.
 
 use egui::{Ui, vec2};
@@ -13,7 +13,7 @@ use crate::dialogs_insert::{InsertDialog, SymbolForm};
 use crate::theme::{Tokens, regular, semibold};
 
 /// The alignments the dialog offers: `para.defineBullet`'s `align` and their names.
-pub const ALIGNMENTS: [(&str, &str); 3] = [("left", "Left"), ("center", "Centered"), ("right", "Right")];
+pub const ALIGNMENTS: [(&str, &str); 3] = [("left", "Left"), ("center", "Center"), ("right", "Right")];
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,6 +22,12 @@ pub struct DefineBulletForm {
     pub ch: String,
     /// The bullet's own font; empty = the text's.
     pub font: String,
+    /// The bullet's size in points; empty = the text's.
+    pub size: String,
+    pub bold: bool,
+    pub italic: bool,
+    /// `RRGGBB`; empty or `auto` = the text's colour.
+    pub color: String,
     /// `left`, `center` or `right`.
     pub align: String,
 }
@@ -41,6 +47,13 @@ impl DefineBulletForm {
             Some(l) => DefineBulletForm {
                 ch: l.text.clone(),
                 font: l.chr.font.clone().unwrap_or_default(),
+                size: l.chr.size.map(|s| s.to_string()).unwrap_or_default(),
+                bold: l.chr.bold.unwrap_or(false),
+                italic: l.chr.italic.unwrap_or(false),
+                color: match l.chr.color {
+                    Some(wordcraft_doc::props::TextColor::Rgb(c)) => c.hex(),
+                    _ => String::new(),
+                },
                 align: match l.align {
                     Align::Center => "center",
                     Align::Right => "right",
@@ -48,69 +61,124 @@ impl DefineBulletForm {
                 }
                 .into(),
             },
-            None => DefineBulletForm { ch: "•".into(), font: String::new(), align: "left".into() },
+            None => DefineBulletForm::plain("•"),
+        }
+    }
+
+    /// A bullet `ch` in the text's own formatting, left aligned.
+    pub fn plain(ch: &str) -> DefineBulletForm {
+        DefineBulletForm {
+            ch: ch.into(),
+            font: String::new(),
+            size: String::new(),
+            bold: false,
+            italic: false,
+            color: String::new(),
+            align: "left".into(),
+        }
+    }
+
+    /// The bullet's formatting as the preview draws it (the preview fits its size).
+    pub fn chr(&self) -> wordcraft_doc::props::CharProps {
+        wordcraft_doc::props::CharProps {
+            font: (!self.font.is_empty()).then(|| self.font.clone()),
+            bold: self.bold.then_some(true),
+            italic: self.italic.then_some(true),
+            color: wordcraft_doc::Rgb::parse(&self.color).map(wordcraft_doc::props::TextColor::Rgb),
+            ..Default::default()
         }
     }
 
     /// The `para.defineBullet` params this form stands for.
     pub fn params(&self) -> serde_json::Value {
-        json!({"char": self.ch, "font": self.font, "align": self.align})
+        let mut v = json!({"char": self.ch, "font": self.font, "align": self.align, "bold": self.bold, "italic": self.italic});
+        if let Some(pt) = self.size.trim().parse::<f64>().ok().filter(|pt| (1.0..=1638.0).contains(pt)) {
+            v["size"] = json!(pt);
+        }
+        v["color"] = json!(if wordcraft_doc::Rgb::parse(&self.color).is_some() { self.color.as_str() } else { "auto" });
+        v
     }
 }
 
-/// Draws the dialog; returns true to close it (OK, Cancel, or Symbol…, which hands the dialog
-/// over to the Symbol dialog and gets it back when a character is picked).
+/// Draws the dialog; returns true to close it (OK, Cancel, or Symbol… / Font…, which hand the
+/// dialog over to the Symbol or Font dialog and get it back when it closes).
 pub fn body(app: &mut WordApp, ui: &mut Ui, f: &mut DefineBulletForm) -> bool {
     let t = Tokens::get(ui.ctx());
     ui.set_width(340.0);
     ui.label(egui::RichText::new(tl!("Bullet character")).font(semibold(12.0)));
     ui.add_space(4.0);
-    let mut to_symbol = false;
+    let (mut to_symbol, mut to_font) = (false, false);
     ui.horizontal(|ui| {
-        // The current character, in its font, beside the button that changes it.
-        let (r, _) = ui.allocate_exact_size(vec2(34.0, 34.0), egui::Sense::hover());
-        ui.painter().rect_stroke(r, 3.0, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-        crate::previews::glyph(app, ui, r.shrink(4.0), &f.ch, &f.font);
-        if ui.button(tl!("Symbol…")).clicked() {
-            to_symbol = true;
-        }
+        to_symbol = ui.button(tl!("Symbol…")).clicked();
+        to_font = ui.button(tl!("Font…")).clicked();
     });
     if to_symbol {
         let form = f.clone();
         app.dialog = Some(Dialog::Insert(Box::new(InsertDialog::Symbol(SymbolForm::for_bullet(app, form)))));
         return true;
     }
-    ui.add_space(6.0);
-    egui::Grid::new("define_bullet_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
-        ui.label(tl!("Font:"));
-        let normal = tl!("(normal text)").to_string();
-        let mut items = vec![normal.clone()];
-        items.extend(app.previews.families());
-        let shown = if f.font.is_empty() { normal.clone() } else { f.font.clone() };
-        if let Some(v) = crate::widgets::combo(ui, "define_bullet_font", 200.0, &shown, &items, None) {
-            f.font = if v == normal || v.trim().is_empty() { String::new() } else { v.trim().to_string() };
+    if to_font {
+        // The app's own Font dialog, formatting the bullet and handing it back.
+        if let Some(d) = crate::dialogs::font_for_bullet(app, f.clone()) {
+            app.dialog = Some(d);
+            return true;
         }
-        ui.end_row();
+    }
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
         ui.label(tl!("Alignment:"));
-        let current = ALIGNMENTS.iter().find(|(k, _)| *k == f.align).map_or("Left", |(_, n)| *n);
-        egui::ComboBox::from_id_salt("define_bullet_align").selected_text(tl!(current)).width(200.0).show_ui(ui, |ui| {
-            for (k, n) in ALIGNMENTS {
-                if ui.selectable_label(f.align == k, tl!(n)).clicked() {
-                    f.align = k.to_string();
-                }
-            }
-        });
-        ui.end_row();
+        ui.add_space(6.0);
+        for (k, n) in ALIGNMENTS {
+            ui.radio_value(&mut f.align, k.to_string(), tl!(n));
+        }
     });
     ui.add_space(8.0);
     ui.label(egui::RichText::new(tl!("Preview")).font(regular(12.0)).color(t.text_dim));
-    crate::previews::bullet_preview(app, ui, &f.ch, &f.font, &f.align, vec2(340.0, 92.0));
+    preview(app, ui, f);
     ui.add_space(6.0);
     let (ok, cancel) = crate::dialogs_insert::buttons(ui, "OK", "Cancel", f.ch.chars().count() == 1);
     if ok {
         let _ = app.run("para.defineBullet", f.params());
     }
     ok || cancel
+}
+
+/// The preview, drawn like Define New Multilevel List's: two plain lines of text, three bulleted
+/// ones and two plain lines again, as grey bars on a white page. The bullet sits at the first
+/// level's aligned-at position (18 pt), aligned there as chosen, and its text starts at the text
+/// indent (36 pt); the bullet itself is laid out by the layout engine, so a symbol font shows the
+/// character the page will.
+fn preview(app: &mut WordApp, ui: &mut Ui, f: &DefineBulletForm) {
+    let t = Tokens::get(ui.ctx());
+    let row = 17.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(340.0, row * 7.0 + 10.0), egui::Sense::hover());
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 2.0, egui::Color32::WHITE);
+    p.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, t.border_strong), egui::StrokeKind::Inside);
+    // Positions in points, scaled so 4.5 inches fit, as in Define New Multilevel List.
+    let scale = (rect.width() - 16.0) / 324.0;
+    let left = rect.left() + 8.0;
+    let (aligned_at, text_at) = (left + 18.0 * scale, left + 36.0 * scale);
+    let bar = |y: f32, from: f32, gray: u8| {
+        let r = egui::Rect::from_min_max(egui::pos2(from, y - 2.0), egui::pos2(rect.right() - 8.0, y + 2.0));
+        p.rect_filled(r, 1.0, egui::Color32::from_gray(gray));
+    };
+    let glyph = 14.0;
+    for i in 0..7 {
+        let y = rect.top() + 5.0 + row * i as f32 + row / 2.0;
+        if !(2..5).contains(&i) {
+            bar(y, left, 205);
+            continue;
+        }
+        let x = match f.align.as_str() {
+            "center" => aligned_at - glyph / 2.0,
+            "right" => aligned_at - glyph,
+            _ => aligned_at,
+        };
+        let r = egui::Rect::from_min_size(egui::pos2(x, y - glyph / 2.0), vec2(glyph, glyph));
+        crate::previews::glyph(app, ui, r, &f.ch, &f.chr(), egui::Color32::WHITE);
+        bar(y, text_at.max(r.right() + 2.0), 120);
+    }
 }
 
 #[cfg(test)]
@@ -157,7 +225,7 @@ mod tests {
                     body(app, ui, f);
                 }
             },
-            (app, DefineBulletForm { ch: "†".into(), font: "Segoe UI Symbol".into(), align: "right".into() }),
+            (app, DefineBulletForm { font: "Segoe UI Symbol".into(), align: "right".into(), ..DefineBulletForm::plain("†") }),
         );
         h.run_steps(2);
         h.get_by_label("OK").click();
@@ -170,7 +238,7 @@ mod tests {
     /// picked there; Cancel brings it back unchanged.
     #[test]
     fn symbol_picks_the_character_and_returns() {
-        let form = DefineBulletForm { ch: "▪".into(), font: String::new(), align: "center".into() };
+        let form = DefineBulletForm { align: "center".into(), ..DefineBulletForm::plain("▪") };
         let mut h = egui_kittest::Harness::builder().with_size(vec2(500.0, 500.0)).build_ui_state(
             |ui, (app, f): &mut (WordApp, DefineBulletForm)| {
                 if fonts_ready(ui) {

@@ -5019,11 +5019,14 @@ fn define_bullet_gives_the_selection_a_bullet_of_its_own() {
     run(&mut s, "para.defineBullet", json!({"char": "♦"}));
     assert_eq!(s.doc.numbering.level(num_at(&s, 0).num, 0).unwrap().text, "♦");
     // DOCX keeps the character, its font and the alignment.
-    run(&mut s, "para.defineBullet", json!({"char": "✓", "font": "Segoe UI Symbol", "align": "right"}));
+    run(&mut s, "para.defineBullet", json!({"char": "✓", "font": "Segoe UI Symbol", "align": "right", "size": 14, "bold": true, "color": "C00000"}));
     let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
     let n = back.para_at(&Pos::body(0, 0)).unwrap().props.numbering.unwrap();
     let l = back.numbering.level(n.num, 0).unwrap();
     assert_eq!((l.text.as_str(), l.chr.font.as_deref(), l.align), ("✓", Some("Segoe UI Symbol"), Align::Right));
+    // The Font dialog's size, bold and colour reach the bullet too.
+    assert_eq!((l.chr.size, l.chr.bold), (Some(14.0), Some(true)));
+    assert_eq!(l.chr.color, wordcraft_doc::props::TextColor::parse("C00000"));
     // No params: ★, as before.
     s.sel = crate::Selection::caret(Pos::body(2, 0));
     run(&mut s, "para.defineBullet", json!({}));
@@ -5039,6 +5042,10 @@ fn define_bullet_gives_the_selection_a_bullet_of_its_own() {
         json!({"char": "•", "align": 1}),
         json!({"char": "•", "font": 3}),
         json!({"char": "•", "font": long}),
+        json!({"char": "•", "size": 0}),
+        json!({"char": "•", "size": "big"}),
+        json!({"char": "•", "bold": "yes"}),
+        json!({"char": "•", "color": "purple"}),
     ] {
         assert!(s.run("para.defineBullet", &junk).is_err(), "{junk}");
     }
