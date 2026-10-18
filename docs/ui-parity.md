@@ -61,7 +61,7 @@ The Language dialog reads effective character formatting, including document def
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-17 | trivial | Home › Numbering › Define New Number Format… (#2787): number style, number format with `%1` for the number (OK does nothing and a hint says why while it's missing), the number's font (name, bold, italic), alignment and a preview; OK is one `para.defineNumber` on a list of its own; modal dialogs +1 |
+| 2026-10-17 | trivial | Home › Numbering › Define New Number Format… (#2787): number style (with none), number format with the number as one grey piece as in Word (Delete or Backspace removes it and the style becomes none; a number style brings it back where it stood), Font… beside the style (the app's Font dialog, over this one, for the number: it formats no text), alignment and a preview; OK is one `para.defineNumber` on a list of its own; modal dialogs +1 |
 | 2026-10-17 | trivial | Language dialog keeps inherited proofing language and no-proof choices (#2717); readiness estimates unchanged |
 | 2026-10-13 | trivial | New/Modify Table Style: No Border on a part that inherits its lines hides them; emptying the font box makes the part's font inherited again (#1288) |
 | 2026-10-14 | trivial | Tab stops edited on the ruler: corner kind selector, click to set, drag to move or off to clear, per-kind markers mirrored for RTL; each gesture one `para.tabs` call and one undo step; Rulers 85% → 90% |

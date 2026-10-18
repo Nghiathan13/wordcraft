@@ -339,9 +339,6 @@
 	Define New Number Format…	定义新编号格式…
 	Number style:	编号样式：
 	Number format:	编号格式：
-	%1 is the number	%1 表示编号
-	Put %1 where the number goes	请把 %1 放在编号的位置
-	(the text's font)	（正文字体）
 	Delete	删除
 	Delete Cells	删除单元格
 	Delete Columns	删除列

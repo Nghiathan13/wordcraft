@@ -62,32 +62,51 @@ pub fn level_json(l: &Level) -> Value {
 /// Define New Number Format (`para.defineNumber`, #2787): the selected paragraphs get a numbered
 /// list of their own whose first level has the given number style (`format`), number format
 /// (`text`, `%1` = the number), start, alignment and number font. A list of its own, so no other
-/// list changes. Settings Word's dialog can't produce are params errors: a format that isn't a
-/// number style (bullet, none, an unknown name), a number format without `%1`, with another
-/// level's number or longer than 64 characters, an unknown alignment.
+/// list changes. Style `none` is Word's "(none)", what its dialog shows once the number is deleted
+/// from the format: every label is `text` as written. Settings Word's dialog can't produce are
+/// params errors: a format that isn't a number style or none (bullet, an unknown name), a number
+/// style whose `text` lacks `%1`, a `none` whose `text` is missing or holds a number, another
+/// level's number, more than 64 characters, an unknown alignment.
 pub fn define_number(s: &mut Session, v: &Value) -> CmdResult {
     let bad = |m: &str| Err(CmdError::Params(m.into()));
+    let mut none = false;
     if let Some(f) = v.get("format") {
-        let ok = f.as_str().is_some_and(|f| f != "bullet" && f != "none" && NumFormat::ALL.iter().any(|x| x.ooxml() == f));
+        let ok = f.as_str().is_some_and(|f| f != "bullet" && NumFormat::ALL.iter().any(|x| x.ooxml() == f));
         if !ok {
-            return bad("format must be a number style such as decimal, lowerLetter or upperRoman");
+            return bad("format must be a number style such as decimal, lowerLetter or upperRoman, or none");
         }
+        none = f.as_str() == Some("none");
     }
-    if let Some(t) = v.get("text") {
-        let Some(t) = t.as_str() else { return bad("text must be a string") };
-        if !t.contains("%1") {
-            return bad("text must hold %1, the place of the number");
-        }
-        if (2..=9).any(|n| t.contains(&format!("%{n}"))) || t.chars().count() > 64 {
-            return bad("text holds only %1 and is at most 64 characters");
+    match v.get("text") {
+        None if none => return bad("format none needs text, the label every item shows"),
+        None => {}
+        Some(t) => {
+            let Some(t) = t.as_str() else { return bad("text must be a string") };
+            if none && t.contains("%1") {
+                return bad("with format none the text holds no number (%1)");
+            }
+            if !none && !t.contains("%1") {
+                return bad("text must hold %1, the place of the number");
+            }
+            if (2..=9).any(|n| t.contains(&format!("%{n}"))) || t.chars().count() > 64 {
+                return bad("text holds only %1 and is at most 64 characters");
+            }
         }
     }
     if v.get("align").is_some() && !matches!(p::str(v, "align"), Some("left" | "center" | "right")) {
         return bad("align must be left, center or right");
     }
     let mut levels = levels_for(ListKind::Numbered);
+    // The number's formatting from the Font dialog, in `format.set`'s shape (size, underline…).
+    let props: Option<wordcraft_doc::props::CharProps> = match v.get("props") {
+        None | Some(Value::Null) => None,
+        Some(p) => Some(serde_json::from_value(p.clone()).map_err(|e| CmdError::Params(format!("props: {e}")))?),
+    };
     if let Some(first) = levels.first_mut() {
         *first = level_from(first.clone(), 0, v);
+        if let Some(props) = &props {
+            first.chr.overlay(props);
+        }
     }
     let id = s.doc.numbering.try_add_levels(None, levels)?;
     super::para::fmt(s, &|pp| {
@@ -389,6 +408,7 @@ mod tests {
             json!({"text": 5}),
             json!({"format": "bullet"}),
             json!({"format": "none"}),
+            json!({"format": "none", "text": "%1."}),
             json!({"format": "romanish"}),
             json!({"format": 3}),
             json!({"align": "middle"}),
@@ -397,5 +417,14 @@ mod tests {
             assert!(s.run("para.defineNumber", &junk).is_err(), "{junk}");
             assert_eq!(s.doc, doc, "{junk} changes nothing");
         }
+        // Word's "(none)": the number deleted from the format, every label the text as written.
+        s.run("para.defineNumber", &json!({"format": "none", "text": "Note:"})).unwrap();
+        assert_eq!(labels(&mut s), ["Note:", "Note:", "Note:"]);
+        // The Font dialog's properties (format.set's shape) go on the number; junk is an error.
+        s.run("para.defineNumber", &json!({"props": {"size": 14.0, "underline": "single", "caps": true}})).unwrap();
+        let num = s.doc.para_at(&wordcraft_doc::Pos::body(0, 0)).and_then(|p| p.props.numbering).unwrap().num;
+        let chr = s.doc.numbering.abstract_of(num).unwrap().levels[0].chr.clone();
+        assert_eq!((chr.size, chr.underline, chr.caps), (Some(14.0), Some(wordcraft_doc::props::Underline::Single), Some(true)));
+        assert!(s.run("para.defineNumber", &json!({"props": {"size": "big"}})).is_err());
     }
 }

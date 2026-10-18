@@ -135,7 +135,7 @@ Ranked, to beta (detail and remaining milestones in [docs/roadmap.md](docs/roadm
 ## Progress log
 
 | Date | What landed |
-| 2026-10-17 | Home › Numbering › Define New Number Format…: a dialog for the number style, the number format (`%1` = the number), the number's font and alignment, with a preview; `para.defineNumber` now takes alignment and font and rejects a format without the number, so a list never loses its numbers (#2787) |
+| 2026-10-17 | Home › Numbering › Define New Number Format…: a dialog for the number style, the number format (`%1` = the number), the number's formatting through the Font dialog (Font…) and alignment, with a preview; `para.defineNumber` now takes alignment and font and checks its settings. A "none" level's label is now its text without the number, as Word draws it (`Note:`, `%1.` → `.`), where it showed nothing (#2787) |
 | 2026-10-14 | DOCX row table border exceptions render and survive saving. Explicit cell borders win; a row exception does not change other rows. |
 | 2026-10-14 | Tab stops edited on the ruler: the corner selector picks Left/Center/Right/Decimal/Bar, a click sets a stop (Alt skips the snap), dragging moves it with a guide line and position tooltip, dragging off the ruler clears it; markers draw per kind and mirror for RTL; one `para.tabs` call and one undo step per gesture |
 | 2026-10-12 | Fields keep `w:dirty` through DOCX saves (#877): a begin marker flagged by a generator that couldn't compute a result (pandoc-style TOC placeholders) keeps the flag on open/save — as a buffered field or a range field — so Word still refreshes it on open; computing a result (Update Field, Update Table) clears it, like Word's F9 |
