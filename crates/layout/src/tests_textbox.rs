@@ -300,3 +300,36 @@ fn inline_box_fitting_text_it_doesnt_wrap_is_one_line_deep() {
     assert!(one > t + b + 5.0 && one < t + b + 20.0, "one line deep: {one}");
     assert!(height(false) > one + 10.0, "wrapped, it is deeper: {} vs {one}", height(false));
 }
+
+/// Measuring text that doesn't wrap lays its nested boxes out once more than showing it does: the
+/// measuring mustn't use up the nested-box budget, or the boxes after it show blank (#2191 review).
+#[test]
+fn measuring_text_that_doesnt_wrap_leaves_the_nested_box_budget() {
+    let n = 40;
+    assert!(n * 2 > wordcraft_doc::BoxBudget::MAX_NESTED && n < wordcraft_doc::BoxBudget::MAX_NESTED);
+    let mut d = Document::from_text("x");
+    let outer = text_box(&mut d, 0, "Boxes", 144.0, 144.0, TextBody { no_wrap: true, ..Default::default() });
+    let inner: Vec<u32> = (0..n)
+        .map(|i| {
+            let id = d.add_part(PartKind::TextBox, vec![para_block(Paragraph::with_text(&format!("n{i}"), Default::default()))]);
+            let shape = InlineObject::Shape {
+                kind: wordcraft_doc::para::ShapeKind::TextBox,
+                w: 20.0,
+                h: 20.0,
+                fill: None,
+                stroke: None,
+                stroke_width: 1.0,
+                float: Default::default(),
+                story: Some(id),
+                effects: Default::default(),
+                freeform: None,
+                extra: Default::default(),
+            };
+            d.insert_object(&Pos { story: StoryRef::Part(outer), path: Path::top(0), off: 0 }, shape, &Default::default()).unwrap();
+            id
+        })
+        .collect();
+    let l = lay(&d);
+    let shown: Vec<u32> = inner.iter().copied().filter(|id| !lines(&l, *id).is_empty()).collect();
+    assert_eq!(shown.len(), n, "every nested box shows its text");
+}

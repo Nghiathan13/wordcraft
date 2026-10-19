@@ -116,10 +116,11 @@ fn unwrapped_extent(ctx: &mut Ctx, id: u32, depth: usize) -> Option<(f32, f32)> 
         return None;
     }
     let blocks = part.blocks.clone();
-    // Measured apart from where the text is shown: list numbers and equation numbers count once.
-    let snap = (ctx.counters.clone(), ctx.eq_count);
+    // Measured apart from where the text is shown: list numbers, equation numbers and the nested
+    // boxes' budget count once.
+    let snap = (ctx.counters.clone(), ctx.eq_count, ctx.boxes.clone());
     let items = layout_box(ctx, StoryRef::Part(id), &blocks, &[], NO_WRAP_LEN, BoxContext::Other, depth + 1, None).items;
-    (ctx.counters, ctx.eq_count) = snap;
+    (ctx.counters, ctx.eq_count, ctx.boxes) = snap;
     let widest = items
         .iter()
         .filter_map(|it| match it {
@@ -139,10 +140,11 @@ fn mixed_unwrapped_width(ctx: &mut Ctx, id: u32, blocks: &Blocks, depth: usize) 
         return None;
     }
     let paras: Blocks = blocks.iter().filter(|b| matches!(&***b, Block::Para(_))).cloned().collect();
-    // Measured apart from where the text is shown: list numbers and equation numbers count once.
-    let snap = (ctx.counters.clone(), ctx.eq_count);
+    // Measured apart from where the text is shown: list numbers, equation numbers and the nested
+    // boxes' budget count once.
+    let snap = (ctx.counters.clone(), ctx.eq_count, ctx.boxes.clone());
     let items = layout_box(ctx, StoryRef::Part(id), &paras, &[], NO_WRAP_LEN, BoxContext::Other, depth + 1, None).items;
-    (ctx.counters, ctx.eq_count) = snap;
+    (ctx.counters, ctx.eq_count, ctx.boxes) = snap;
     Some(
         items
             .iter()
