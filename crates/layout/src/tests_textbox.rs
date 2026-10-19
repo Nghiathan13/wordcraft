@@ -216,9 +216,9 @@ fn a_box_fitting_text_it_doesnt_wrap_takes_the_size_of_its_line() {
     assert!((frame.w - 144.0).abs() < 0.01 && (frame.h - 144.0).abs() < 0.01, "its own size: {frame:?}");
 }
 
-/// A box whose text doesn't wrap but that also holds a table keeps its own size, also when it
-/// resizes to fit its text; its paragraphs still run on one line past its side, and the table
-/// keeps the box's width (#2191 review).
+/// A box whose text doesn't wrap but that also holds a table keeps its own width, also when it
+/// resizes to fit its text (an inline one is then as deep as its text, #2791); its paragraphs
+/// still run on one line past its side, and the table keeps the box's width (#2191 review).
 #[test]
 fn text_that_doesnt_wrap_beside_a_table_stays_on_one_line() {
     let caption = "(Figure 1.1) A time line of the important vaccines, on one line";
@@ -230,7 +230,12 @@ fn text_that_doesnt_wrap_beside_a_table_stays_on_one_line() {
         }
         let l = lay(&d);
         let frame = frame_of(&l, id);
-        assert!((frame.w - 144.0).abs() < 0.01 && (frame.h - 144.0).abs() < 0.01, "its own size: {frame:?} ({body:?})");
+        assert!((frame.w - 144.0).abs() < 0.01, "its own width: {frame:?} ({body:?})");
+        if body.auto_fit {
+            assert!(frame.h < 100.0, "as deep as one line and the table: {frame:?}");
+        } else {
+            assert!((frame.h - 144.0).abs() < 0.01, "its own height: {frame:?}");
+        }
         let caption_lines = l.pages[0].items.iter().find_map(|it| match it {
             Placed::Lines { story: StoryRef::Part(s), para, .. } if *s == id => Some((para.lines.len(), natural_width(para))),
             _ => None,
@@ -246,4 +251,52 @@ fn text_that_doesnt_wrap_beside_a_table_stays_on_one_line() {
             assert!(right <= frame.right() + 1.0, "the table stays in the box: {right} > {}", frame.right());
         }
     }
+}
+
+#[test]
+fn inline_box_that_resizes_to_fit_takes_its_texts_height() {
+    // #2791: an inline box with Resize shape to fit text, saved 10 cm tall around three short
+    // lines, shrinks to them as in Word; the page break after it stays on the first page.
+    let brk = wordcraft_doc::para::PAGE_BREAK;
+    let doc = |auto_fit: bool| {
+        let filler: Vec<String> = (1..=FILLER).map(|i| format!("Filler line {i}")).collect();
+        let mut d = Document::from_text(&format!("{}\n\n\n{brk}\nSecond page text.", filler.join("\n")));
+        let id = text_box(&mut d, FILLER, "", 453.5, 283.46, TextBody { auto_fit, anchor: VAlign::Center, ..Default::default() });
+        d.parts.get_mut(&id).unwrap().blocks =
+            (1..=3).map(|i| para_block(Paragraph::with_text(&format!("Text box line {i}"), Default::default()))).collect();
+        let l = lay(&d);
+        let r = l.pages.iter().find_map(|p| {
+            p.items.iter().find_map(|it| match it {
+                Placed::Object { rect, text_box: Some(s), .. } if *s == id => Some(*rect),
+                _ => None,
+            })
+        });
+        (l.pages.len(), r.unwrap())
+    };
+    let (pages, r) = doc(true);
+    assert!(r.h > 3.0 * 12.0 && r.h < 80.0, "the box fits its three lines: {r:?}");
+    assert_eq!(pages, 2, "the page break stays on the first page");
+    let (pages, saved) = doc(false);
+    assert_eq!(pages, 3, "a box keeping its 10 cm pushes the page break over");
+    assert!((saved.h - 283.46).abs() < 1.0, "without auto-fit the box keeps its saved height: {saved:?}");
+}
+
+/// Filler paragraphs before the box in [`inline_box_that_resizes_to_fit_takes_its_texts_height`]:
+/// enough that a 10 cm box no longer leaves room for the page break on the first page.
+const FILLER: usize = 22;
+
+/// An inline box that resizes to fit text it doesn't wrap is one line deep (#2191 with #2791's
+/// inline fitting); with its text wrapping it is as deep as the wrapped lines.
+#[test]
+fn inline_box_fitting_text_it_doesnt_wrap_is_one_line_deep() {
+    let caption = "(Figure 1.1) A time line of the important vaccines, on one line";
+    let height = |no_wrap: bool| {
+        let mut d = Document::from_text("x");
+        let id = text_box(&mut d, 0, caption, 144.0, 283.0, TextBody { auto_fit: true, no_wrap, ..Default::default() });
+        frame_of(&lay(&d), id).h
+    };
+    let [_, t, _, b] = TextBody::default().insets_pt();
+    let one = height(true);
+    assert!(one > t + b + 5.0 && one < t + b + 20.0, "one line deep: {one}");
+    assert!(height(false) > one + 10.0, "wrapped, it is deeper: {} vs {one}", height(false));
 }
