@@ -22,6 +22,9 @@ pub(crate) struct ImeSpot {
     shown: Option<Rect>,
     /// Keys came in since the last click, tap or window focus.
     typing: bool,
+    /// Placements left that follow the caret whatever came in: a click's frame places the caret
+    /// before the click moves it, so the next frame follows it too, keys or not.
+    follow: u8,
 }
 
 impl ImeSpot {
@@ -29,6 +32,9 @@ impl ImeSpot {
     /// has key, text or input-method events, `pointer` when it has a click, a tap or the window's
     /// focus. Keys win in a frame with both.
     pub(crate) fn note(&mut self, keys: bool, pointer: bool) {
+        if pointer {
+            self.follow = 2;
+        }
         if keys {
             self.typing = true;
         } else if pointer {
@@ -37,10 +43,13 @@ impl ImeSpot {
     }
 
     /// The spot for the caret at `caret`: the caret, except over XIM (`xim`) once keys have come
-    /// in since the last click ([`ImeSpot::note`]), when it stays where it was.
+    /// in since the last click ([`ImeSpot::note`]), when it stays where it was. A click's frame and
+    /// the one after it follow the caret either way.
     pub(crate) fn place(&mut self, caret: Rect, xim: bool) -> Rect {
+        let follow = self.follow > 0;
+        self.follow = self.follow.saturating_sub(1);
         match self.shown {
-            Some(shown) if xim && self.typing => shown,
+            Some(shown) if xim && self.typing && !follow => shown,
             _ => {
                 self.shown = Some(caret);
                 caret
@@ -85,6 +94,19 @@ mod tests {
         assert_eq!(frame(&mut s, 34.0, false, false, true), at(10.0), "keys in a frame that didn't place the caret");
         assert_eq!(frame(&mut s, 90.0, false, true, true), at(90.0), "a click");
         assert_eq!(frame(&mut s, 120.0, false, false, true), at(120.0), "the caret settling after it");
-        assert_eq!(frame(&mut s, 128.0, true, true, true), at(120.0), "keys win in a frame with a click too");
+        assert_eq!(frame(&mut s, 128.0, true, false, true), at(120.0), "typing again");
+    }
+
+    /// The frame of a click places the caret before the click moves it: the next frame follows
+    /// the caret too, also when the first key after the click is already in it.
+    #[test]
+    fn the_frame_after_a_click_follows_the_caret_even_with_keys() {
+        let mut s = ImeSpot::default();
+        assert_eq!(frame(&mut s, 10.0, true, false, true), at(10.0));
+        assert_eq!(frame(&mut s, 18.0, true, false, true), at(10.0), "typing");
+        assert_eq!(frame(&mut s, 18.0, false, true, true), at(18.0), "the click's frame, caret not moved yet");
+        assert_eq!(frame(&mut s, 90.0, true, false, true), at(90.0), "the next frame, with a key");
+        assert_eq!(frame(&mut s, 98.0, true, false, true), at(90.0), "typing holds it again");
+        assert_eq!(frame(&mut s, 98.0, true, true, true), at(98.0), "a frame with a click and keys");
     }
 }

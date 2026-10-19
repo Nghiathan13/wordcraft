@@ -6097,6 +6097,8 @@ mod tests {
             let first = spot(&h);
             assert!(first.is_finite(), "the canvas gives the input method a spot");
             type_text(&mut h, "bcd");
+            let text = h.state().session.doc.plain_text(wordcraft_doc::StoryRef::Body);
+            assert!(text.contains("abcd"), "the keys are typed: {text:?}");
             if xim {
                 assert_eq!(spot(&h), first, "typing leaves the spot over XIM");
             } else {
