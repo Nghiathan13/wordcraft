@@ -164,6 +164,8 @@ pub struct CanvasState {
     /// An automatic change (AutoCorrect, AutoFormat) altered the text around the caret: the
     /// input method is asked to start afresh (#1480).
     pub(crate) ime_reset: bool,
+    /// Where the input method was last told the caret is ([`crate::ime_spot`], #2932).
+    pub(crate) ime_spot: crate::ime_spot::ImeSpot,
     /// Alt+numpad entry in progress: the digits typed while Alt is held (#961).
     pub(crate) alt_code: String,
     /// The character an Alt code just typed: if the platform also sends its own composed
@@ -261,6 +263,7 @@ impl Default for CanvasState {
             swallow_text: false,
             ime_join_text: None,
             ime_reset: false,
+            ime_spot: Default::default(),
             alt_code: String::new(),
             alt_code_echo: None,
             wheel: Default::default(),
@@ -946,6 +949,17 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
     // Keys first, so this frame lays out and paints what was typed (handled after painting, a
     // keystroke showed one frame later). Focus is the canvas's from the last frame.
     // While "Save changes?" is up, keys answer it rather than edit the document behind it.
+    // Every frame notes its keys and clicks for the input method's spot, also one that won't
+    // place the caret (#2932).
+    let (keys, pointer) = ui.ctx().input(|i| {
+        let keys = i.events.iter().any(|e| matches!(e, egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::Ime(_)));
+        let pointer = i
+            .events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. } | egui::Event::Touch { .. } | egui::Event::WindowFocused(true)));
+        (keys, pointer)
+    });
+    app.canvas.ime_spot.note(keys, pointer);
     if app.canvas.focused && !matches!(app.dialog, Some(crate::dialogs::Dialog::SaveChanges { .. })) {
         crate::keys::canvas_events(app, ui.ctx());
     } else {
@@ -1492,15 +1506,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                 }
                 if focused {
                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(530 - (since as u64 % 530)));
-                    let cr = Rect::from_min_max(pos2(x, y0), pos2(x + 1.0, y1));
-                    ui.ctx().output_mut(|o| {
-                        o.ime = Some(egui::output::IMEOutput {
-                            rect: cr,
-                            cursor_rect: cr,
-                            purpose: Default::default(),
-                            should_interrupt_composition: ime_reset,
-                        });
-                    });
+                    ime_output(app, ui.ctx(), Rect::from_min_max(pos2(x, y0), pos2(x + 1.0, y1)), ime_reset);
                 }
             }
         }
@@ -1533,16 +1539,8 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(530 - (since as u64 % 530)));
             }
             // IME candidate window placement.
-            let cr = Rect::from_min_max(pos2(x, y0), pos2(x + 1.0, y1));
             if focused {
-                ui.ctx().output_mut(|o| {
-                    o.ime = Some(egui::output::IMEOutput {
-                        rect: cr,
-                        cursor_rect: cr,
-                        purpose: Default::default(),
-                        should_interrupt_composition: ime_reset,
-                    });
-                });
+                ime_output(app, ui.ctx(), Rect::from_min_max(pos2(x, y0), pos2(x + 1.0, y1)), ime_reset);
             }
             if !app.canvas.ime_preedit.is_empty() {
                 // The composition is interface text, but it may be in a script the interface fonts lack
@@ -3351,6 +3349,14 @@ fn is_followable_link(url: &str) -> bool {
     wordcraft_doc::link::is_web_or_mail_link(url)
 }
 
+/// Tell the input method where the caret `caret` is (its candidate window and spot); over XIM
+/// typing doesn't move it ([`crate::ime_spot`], #2932).
+fn ime_output(app: &mut WordApp, ctx: &egui::Context, caret: Rect, reset: bool) {
+    let rect = app.canvas.ime_spot.place(caret, app.services.xim);
+    ctx.output_mut(|o| {
+        o.ime = Some(egui::output::IMEOutput { rect, cursor_rect: rect, purpose: Default::default(), should_interrupt_composition: reset });
+    });
+}
 #[cfg(test)]
 mod tests {
     use super::*;
