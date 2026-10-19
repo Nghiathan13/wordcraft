@@ -737,8 +737,9 @@ pub struct SectionProps {
     /// so saving writes it back. Borders created in WordCraft leave this `false` (page edge).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub page_borders_from_text: bool,
-    /// `w:display` of the page borders as read (`allPages`, `firstPage`, `notFirstPage`).
-    /// Kept so saving writes it back; WordCraft always draws them on every page.
+    /// `w:display` of the page borders (`allPages`, `firstPage`, `notFirstPage`; ECMA-376
+    /// §17.6.10): the pages of the section they are drawn on, as read and saved back. `None` is
+    /// every page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_borders_display: Option<String>,
     /// `w:zOrder` of the page borders as read (`front`, `back`). Kept so saving writes it back.
