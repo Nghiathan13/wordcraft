@@ -139,21 +139,24 @@ fn mixed_unwrapped_width(ctx: &mut Ctx, id: u32, blocks: &Blocks, depth: usize) 
     if !body.no_wrap || body.vert != TextVert::Horz || body.next.is_some() || shown_story(ctx, id) != id {
         return None;
     }
+    Some(paras_widest(ctx, id, blocks, depth))
+}
+
+/// The widest line of story `id`'s paragraphs among `blocks`, laid out on their own and unwrapped.
+fn paras_widest(ctx: &mut Ctx, id: u32, blocks: &Blocks, depth: usize) -> f32 {
     let paras: Blocks = blocks.iter().filter(|b| matches!(&***b, Block::Para(_))).cloned().collect();
     // Measured apart from where the text is shown: list numbers, equation numbers and the nested
     // boxes' budget count once.
     let snap = (ctx.counters.clone(), ctx.eq_count, ctx.boxes.clone());
     let items = layout_box(ctx, StoryRef::Part(id), &paras, &[], NO_WRAP_LEN, BoxContext::Other, depth + 1, None).items;
     (ctx.counters, ctx.eq_count, ctx.boxes) = snap;
-    Some(
-        items
-            .iter()
-            .filter_map(|it| match it {
-                Placed::Lines { para, .. } => Some(natural_width(para)),
-                _ => None,
-            })
-            .fold(0.0f32, f32::max),
-    )
+    items
+        .iter()
+        .filter_map(|it| match it {
+            Placed::Lines { para, .. } => Some(natural_width(para)),
+            _ => None,
+        })
+        .fold(0.0f32, f32::max)
 }
 
 /// `blocks` with each paragraph's lines `room` points longer (its right indent that much less),
@@ -331,7 +334,7 @@ fn flow(ctx: &mut Ctx, chain: &[u32], depth: usize) -> Vec<Vec<Placed>> {
     // time), sharing a layout with the boxes before it of the same length.
     let snap = (ctx.counters.clone(), ctx.eq_count);
     let mut after = None;
-    let mut layouts: Vec<((u32, TextVert), Vec<Placed>)> = Vec::new();
+    let mut layouts: Vec<((u32, TextVert, bool), Vec<Placed>)> = Vec::new();
     let mut out = Vec::with_capacity(chain.len());
     // Where the next box's text starts: `Some(None)` at the beginning, `None` when all is shown.
     let mut start: Option<Option<Cut>> = Some(None);
@@ -343,12 +346,21 @@ fn flow(ctx: &mut Ctx, chain: &[u32], depth: usize) -> Vec<Vec<Placed>> {
         let body = ctx.doc.parts.get(id).map(|p| p.body).unwrap_or_default();
         let (w, h) = sizes.get(id).copied().unwrap_or((0.0, 0.0));
         let (len, across) = frame(&body, w, h);
-        let key = (len.to_bits(), body.vert);
+        let key = (len.to_bits(), body.vert, body.no_wrap);
         let items = match layouts.iter().find(|(k, _)| *k == key) {
             Some((_, items)) => items.clone(),
             None => {
                 (ctx.counters, ctx.eq_count) = (snap.0.clone(), snap.1);
-                let items = lay(ctx, head, &blocks, len, body.vert, depth);
+                // Text that doesn't wrap runs on to its widest line in this box too; tables keep
+                // the box's width (#2191).
+                let mut shown = blocks.clone();
+                if body.no_wrap && body.vert == TextVert::Horz {
+                    let widest = paras_widest(ctx, head, &blocks, depth);
+                    if widest + FIT_SLACK > len {
+                        shown = widen_paras(ctx, &blocks, widest + FIT_SLACK - len);
+                    }
+                }
+                let items = lay(ctx, head, &shown, len, body.vert, depth);
                 after.get_or_insert_with(|| (ctx.counters.clone(), ctx.eq_count));
                 layouts.push((key, items.clone()));
                 items

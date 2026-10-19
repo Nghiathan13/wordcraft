@@ -333,3 +333,27 @@ fn measuring_text_that_doesnt_wrap_leaves_the_nested_box_budget() {
     let shown: Vec<u32> = inner.iter().copied().filter(|id| !lines(&l, *id).is_empty()).collect();
     assert_eq!(shown.len(), n, "every nested box shows its text");
 }
+
+/// A linked box whose text doesn't wrap runs its paragraphs on past its side too, and the next box
+/// picks up at the next paragraph (#2191 review).
+#[test]
+fn a_linked_box_whose_text_doesnt_wrap_keeps_each_paragraph_on_one_line() {
+    let mut d = Document::from_text("one\ntwo");
+    let a = text_box(
+        &mut d,
+        0,
+        "(Figure 1.1) A time line of the important vaccines, on one line",
+        144.0,
+        30.0,
+        TextBody { no_wrap: true, ..Default::default() },
+    );
+    let b = text_box(&mut d, 1, "", 144.0, 200.0, TextBody::default());
+    d.parts.get_mut(&a).unwrap().blocks.push(para_block(Paragraph::with_text("The next paragraph.", Default::default())));
+    d.parts.get_mut(&a).unwrap().body.next = Some(b);
+    let l = lay(&d);
+    let first = l.pages[0].items.iter().find_map(|it| match it {
+        Placed::Lines { story: StoryRef::Part(s), path, para, .. } if *s == a && path.0 == [0] => Some(para.lines.len()),
+        _ => None,
+    });
+    assert_eq!(first, Some(1), "the caption stays on one line in the linked box");
+}
