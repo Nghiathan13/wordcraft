@@ -4024,8 +4024,11 @@ fn place_table(ctx: &mut Ctx, pb: &mut PageBuilder, t: &wordcraft_doc::Table, bl
         // so the edge sits a cell margin further out.
         let legacy = if ctx.doc.settings.compat_mode < 15 { table::first_cell_left_margin(ctx, t) } else { 0.0 };
         let h: f32 = tl.rows.iter().map(|r| r.height).sum();
-        if h <= pb.uncapped_bottom() - pb.top + 0.01 && place_floating_table(ctx, pb, &tl, &f, legacy, block, body_top) {
-            return;
+        if h <= pb.uncapped_bottom() - pb.top + 0.01 {
+            let Some(top) = place_floating_table(ctx, pb, &tl, &f, legacy, block, body_top) else { return };
+            // Running on, it starts at its own top (its vertical offset kept), never above the
+            // text before it.
+            pb.y = pb.y.max(top);
         }
         // Too tall for a page, or placed relative to the paragraph and too tall for the rest of
         // this one (#2359): Word lets it run across pages like a table in the text, from its own
@@ -4243,8 +4246,9 @@ fn header_table_areas(ctx: &mut Ctx, pb: &PageBuilder) -> Vec<Rect> {
 }
 
 /// Place floating table `tl` (`w:tblpPr`): at its own position, which takes no room in the text
-/// flow; the text after it wraps around it. False, with nothing placed, for a table placed
-/// relative to the paragraph that would run off the page: the caller runs it on in the text.
+/// flow; the text after it wraps around it. `None` once placed; for a table placed relative to the
+/// paragraph that would run off the page, nothing is placed and its top is returned: the caller
+/// runs it on in the text from there.
 fn place_floating_table(
     ctx: &mut Ctx,
     pb: &mut PageBuilder,
@@ -4253,7 +4257,7 @@ fn place_floating_table(
     legacy: f32,
     block: usize,
     body_top: f32,
-) -> bool {
+) -> Option<f32> {
     let h: f32 = tl.rows.iter().map(|r| r.height).sum::<f32>().clamp(0.0, 100_000.0);
     let w = tl.width.clamp(1.0, 100_000.0);
     let [dl, dt, dr, db] = f.dist_from_text();
@@ -4277,7 +4281,7 @@ fn place_floating_table(
         if attempt == 0 && !pb.at_top() {
             if f.v_rel == Anchor::Paragraph {
                 if r.bottom() > pb.bottom + 0.01 {
-                    return false;
+                    return Some(r.y);
                 }
             } else if pb.y + h > pb.bottom + 0.01 && pb.page().is_some_and(|page| page.items.iter().any(|item| placed_intersects(item, &r))) {
                 pb.advance(block, body_top);
@@ -4298,9 +4302,9 @@ fn place_floating_table(
         let area = r.inset(-dl, -dt, -dr, -db);
         pb.excl.push((area, false, None, WrapText::BothSides));
         pb.float_tables.push(area);
-        return true;
+        return None;
     }
-    true
+    None
 }
 
 fn placed_intersects(item: &Placed, rect: &Rect) -> bool {
