@@ -357,3 +357,33 @@ fn a_linked_box_whose_text_doesnt_wrap_keeps_each_paragraph_on_one_line() {
     });
     assert_eq!(first, Some(1), "the caption stays on one line in the linked box");
 }
+
+/// A linked box whose text doesn't wrap, picking up partway through a paragraph the box before it
+/// wrapped, carries on from the next line rather than showing that paragraph again from its start
+/// (#2191 review).
+#[test]
+fn a_no_wrap_box_continuing_a_wrapped_paragraph_shows_only_the_rest() {
+    let mut d = Document::from_text("one\ntwo");
+    let text = "Words that run on well past the first little box. ".repeat(6);
+    let a = text_box(&mut d, 0, &text, 144.0, 48.0, TextBody::default());
+    let b = text_box(&mut d, 1, "", 144.0, 400.0, TextBody { no_wrap: true, ..Default::default() });
+    let in_a = {
+        let l = lay(&d);
+        lines(&l, a).iter().map(|(.., l0, l1)| l1 - l0).sum::<usize>()
+    };
+    d.parts.get_mut(&a).unwrap().body.next = Some(b);
+    let l = lay(&d);
+    // Both boxes show the first box's story: the second frame is the no-wrap box.
+    let frames: Vec<Rect> = l.pages[0]
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Placed::Object { rect, text_box: Some(s), .. } if *s == a => Some(*rect),
+            _ => None,
+        })
+        .collect();
+    let rb = frames[1];
+    let ls = lines(&l, a);
+    let rest: Vec<_> = ls.iter().filter(|(_, y, ..)| *y >= rb.y).collect();
+    assert_eq!(rest.first().map(|(.., l0, _)| *l0), Some(in_a), "carries on from the first line the first box couldn't show: {ls:?}");
+}

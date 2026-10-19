@@ -346,15 +346,18 @@ fn flow(ctx: &mut Ctx, chain: &[u32], depth: usize) -> Vec<Vec<Placed>> {
         let body = ctx.doc.parts.get(id).map(|p| p.body).unwrap_or_default();
         let (w, h) = sizes.get(id).copied().unwrap_or((0.0, 0.0));
         let (len, across) = frame(&body, w, h);
-        let key = (len.to_bits(), body.vert, body.no_wrap);
+        // Text that doesn't wrap runs on to its widest line in this box too, when the box starts
+        // at a paragraph; one picking up partway through a paragraph wraps it, or it would show
+        // that paragraph again from its start.
+        let unwrap = body.no_wrap && body.vert == TextVert::Horz && cut.as_ref().is_none_or(|c| c.byte == 0);
+        let key = (len.to_bits(), body.vert, unwrap);
         let items = match layouts.iter().find(|(k, _)| *k == key) {
             Some((_, items)) => items.clone(),
             None => {
                 (ctx.counters, ctx.eq_count) = (snap.0.clone(), snap.1);
-                // Text that doesn't wrap runs on to its widest line in this box too; tables keep
-                // the box's width (#2191).
+                // Tables keep the box's width (#2191).
                 let mut shown = blocks.clone();
-                if body.no_wrap && body.vert == TextVert::Horz {
+                if unwrap {
                     let widest = paras_widest(ctx, head, &blocks, depth);
                     if widest + FIT_SLACK > len {
                         shown = widen_paras(ctx, &blocks, widest + FIT_SLACK - len);
