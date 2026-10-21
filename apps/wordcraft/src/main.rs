@@ -424,6 +424,7 @@ fn main() -> eframe::Result {
             let (file_dialog, dialogs) = file_dialogs::hook(&cc.egui_ctx);
             let mut session = Session::new(doc);
             session.system_region = region;
+            #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(unused_mut))]
             let mut services = services(file_dialog, &cc.egui_ctx);
             // On X11 input methods talk to the window over XIM, whose spot typing doesn't move
             // (#2932).
