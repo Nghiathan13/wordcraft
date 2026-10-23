@@ -855,8 +855,10 @@ fn a_missing_font_is_drawn_in_its_font_table_alternate() {
     // generic substitutes for a font that isn't roman.
     assert_eq!(face(Some("No Such Alternate"), true), cambria);
     assert_eq!(face(Some("No Such Alternate"), false), generic);
-    // A comma-separated list: the first that can be drawn.
-    assert_eq!(face(Some("No Such Alternate, Times New Roman"), false), times);
+    // Word reads a value with a comma as one name, not a list (MS-OE376 2.1.264): no font is
+    // called that, so the roman rule or the generic substitutes draw it.
+    assert_eq!(face(Some("No Such Alternate, Times New Roman"), false), generic);
+    assert_eq!(face(Some("No Such Alternate, Times New Roman"), true), cambria);
 }
 
 #[test]
@@ -7272,6 +7274,47 @@ fn east_asian_text_takes_the_asian_font_and_latin_text_the_latin_font() {
         let want = if ch.is_ascii() { latin_face } else { asian_face };
         assert_eq!(face, want, "{ch:?} in {}", if ch.is_ascii() { latin } else { &asian });
     }
+}
+
+#[test]
+fn a_missing_east_asian_font_is_drawn_in_its_font_table_alternate() {
+    // #2702 for the run's East Asian font (`w:eastAsia`): one that isn't installed is drawn in the
+    // alternate its font table names, when that one is installed and has the characters. Take an
+    // installed CJK font other than the one fallback would pick anyway, so the test tells them apart.
+    let resolve = |f: &str| wordcraft_fonts::word::resolve(f, false, false);
+    let fallback = wordcraft_fonts::FontDb::global().fallback_for('你', 0).map(|f| f.family.clone());
+    let Some(asian) = wordcraft_fonts::FontDb::global().east_asian_families().into_iter().find(|f| {
+        let r = resolve(f);
+        Some(f) != fallback.as_ref() && !r.substituted && r.face.covers('你') && r.face.covers('好')
+    }) else {
+        eprintln!("skipped: no second Chinese font installed");
+        return;
+    };
+    let missing = "No Such East Asian Font 2702";
+    let text = "Hello 你好";
+    let faces = |alternate: bool| {
+        let mut d = Document::from_text(text);
+        if alternate {
+            d.settings.font_alt_names = vec![(missing.into(), asian.clone())];
+        }
+        d.format_range(&Pos::body(0, 0), &Pos::body(0, text.len()), &|c| {
+            c.font = Some(wordcraft_doc::styles::BODY_FONT.into());
+            c.font_ea = Some(missing.into());
+        })
+        .unwrap();
+        let l = lay(&d);
+        let para =
+            l.pages.iter().flat_map(|p| p.items.iter()).find_map(|it| if let Placed::Lines { para, .. } = it { Some(para) } else { None }).unwrap();
+        para.clusters
+            .iter()
+            .filter(|c| text.get(c.start..c.end).and_then(|s| s.chars().next()).is_some_and(|ch| !ch.is_ascii()))
+            .map(|c| para.styles[c.style as usize].face.id())
+            .collect::<Vec<_>>()
+    };
+    let asian_face = resolve(&asian).face.id();
+    let with = faces(true);
+    assert!(!with.is_empty() && with.iter().all(|f| *f == asian_face), "你好 in the alternate {asian}");
+    assert!(faces(false).iter().all(|f| *f != asian_face), "without the alternate, fallback picks another font");
 }
 
 /// A page total in the footer ("Page X of Y") is filled in after pagination, so it doesn't make

@@ -816,7 +816,9 @@ fn lookup_family<'f>(doc: &'f Document, font: &'f str) -> &'f str {
     // Calibri has no list of its own because the generic sans list is its (Carlito first).
     let drawable =
         |f: &&str| !f.is_empty() && (installed(f) || wordcraft_fonts::word::has_installed_substitute(f) || f.eq_ignore_ascii_case("Calibri"));
-    if let Some(alt) = alternate.and_then(|a| a.split(',').map(str::trim).find(drawable)) {
+    // ECMA-376 calls the alternate a comma-separated list, but Word reads the whole value as one
+    // name (MS-OE376 2.1.264), so a value with a comma names a font that isn't there.
+    if let Some(alt) = alternate.map(str::trim).filter(drawable) {
         return alt;
     }
     // Thai, symbol and fonts with substitutes of their own keep their name: those substitutes
@@ -948,12 +950,12 @@ impl<'a> Builder<'a> {
         let show = |c: char| sym.map_or(c, |m| m.show(c));
         let primary_cs = rc_cs.as_ref().map(|r| wordcraft_fonts::word::resolve(lookup_family(self.env.doc, &r.font), r.bold, r.italic).face);
         // Chinese, Japanese and Korean characters use the run's East Asian font (`w:eastAsia`) when
-        // it is installed and has them.
+        // it, or the font table alternate it is drawn in (#2702), is installed and has them.
         let primary_ea = rc
             .font_ea
             .as_ref()
             .filter(|f| !f.eq_ignore_ascii_case(&rc.font) && text.chars().any(east_asian))
-            .map(|f| wordcraft_fonts::word::resolve(f, rc.bold, rc.italic))
+            .map(|f| wordcraft_fonts::word::resolve(lookup_family(self.env.doc, f), rc.bold, rc.italic))
             .filter(|r| !r.substituted)
             .map(|r| r.face);
         // The levels by byte of `text`, from `lbase` on.
