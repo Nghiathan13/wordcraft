@@ -100,7 +100,8 @@ impl ListStyleForm {
                     l.color = wordcraft_doc::Rgb(*r.min(&255) as u8, *g.min(&255) as u8, *b.min(&255) as u8).hex();
                 }
             }
-            Some(Value::String(a)) if a == "auto" => l.color.clear(),
+            // The Font dialog sends Automatic as "Auto".
+            Some(Value::String(a)) if a.eq_ignore_ascii_case("auto") => l.color.clear(),
             _ => {}
         }
     }
@@ -525,7 +526,7 @@ mod tests {
         let back = form.number_props();
         assert_eq!((back["size"].as_f64(), back["underline"].as_str()), (Some(14.0), Some("single")));
         changed.clear();
-        changed.insert("color".into(), json!("auto"));
+        changed.insert("color".into(), json!("Auto"));
         form.take_number_props(&changed);
         assert!(form.list.levels[0].color.is_empty());
     }
