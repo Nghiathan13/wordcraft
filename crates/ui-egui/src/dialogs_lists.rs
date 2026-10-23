@@ -14,7 +14,7 @@ use crate::options::MeasureExt;
 use crate::theme::{Tokens, semibold};
 
 /// Number styles a level can have: OOXML name and a sample.
-const STYLES: [(&str, &str); 10] = [
+pub(crate) const STYLES: [(&str, &str); 10] = [
     ("decimal", "1, 2, 3, …"),
     ("lowerLetter", "a, b, c, …"),
     ("upperLetter", "A, B, C, …"),
@@ -46,13 +46,18 @@ pub struct LevelForm {
     pub tab_on: bool,
     pub tab_at: f32,
     pub font: String,
+    /// The number's size in points, 0 for the paragraph's.
+    pub size: f32,
     pub bold: bool,
     pub italic: bool,
+    pub underline: bool,
+    /// The number's colour (RRGGBB), empty for automatic.
+    pub color: String,
     pub legal: bool,
 }
 
 impl LevelForm {
-    fn read(i: usize, v: &Value) -> LevelForm {
+    pub(crate) fn read(i: usize, v: &Value) -> LevelForm {
         let k = crate::options::unit().pt_per_unit();
         let s = |key: &str| v.get(key).and_then(Value::as_str).unwrap_or("").to_string();
         let f = |key: &str| v.get(key).and_then(Value::as_f64).map(|x| x as f32 / k).filter(|x| x.is_finite());
@@ -71,8 +76,11 @@ impl LevelForm {
             tab_on: f("tabAt").is_some(),
             tab_at: f("tabAt").or(f("indentAt")).unwrap_or(0.0),
             font: s("font"),
+            size: v.get("size").and_then(Value::as_f64).map(|x| x as f32).filter(|x| x.is_finite() && *x > 0.0).unwrap_or(0.0),
             bold: v.get("bold").and_then(Value::as_bool).unwrap_or(false),
             italic: v.get("italic").and_then(Value::as_bool).unwrap_or(false),
+            underline: v.get("underline").and_then(Value::as_bool).unwrap_or(false),
+            color: s("color"),
             legal: v.get("legal").and_then(Value::as_bool).unwrap_or(false),
         }
     }
@@ -92,8 +100,11 @@ impl LevelForm {
             "follow": self.follow,
             "tabAt": if self.tab_on && self.follow == "tab" { json!(self.tab_at * k) } else { Value::Null },
             "font": if self.font.trim().is_empty() { Value::Null } else { json!(self.font.trim()) },
+            "size": if self.size > 0.0 { json!(self.size) } else { Value::Null },
             "bold": self.bold,
             "italic": self.italic,
+            "underline": self.underline,
+            "color": if wordcraft_doc::Rgb::parse(&self.color).is_some() { json!(self.color) } else { Value::Null },
             "legal": self.legal,
         })
     }
@@ -116,6 +127,12 @@ impl ListForm {
         let s = &app.session;
         let levels =
             caret_list(s).and_then(|n| levels_of(s, n)).unwrap_or_else(|| wordcraft_doc::numbering::levels_for(wordcraft_doc::ListKind::Numbered));
+        ListForm::with_levels(app, &levels)
+    }
+
+    /// The form for `levels` (nine; missing ones are blank).
+    pub fn with_levels(app: &WordApp, levels: &[wordcraft_doc::numbering::Level]) -> ListForm {
+        let s = &app.session;
         let levels = (0..LEVELS).map(|i| LevelForm::read(i, &levels.get(i).map(level_json).unwrap_or(Value::Null))).collect();
         let mut styles: Vec<(String, String)> = s
             .doc
@@ -163,6 +180,17 @@ impl ListForm {
 
 /// Define New Multilevel List. Returns true to close.
 pub fn define_list(app: &mut WordApp, ui: &mut Ui, f: &mut ListForm) -> bool {
+    list_fields(ui, f);
+    let (ok, cancel) = buttons(ui, tl!("OK"));
+    if ok && let Err(e) = app.run("list.define", f.params()) {
+        app.status(e);
+    }
+    ok || cancel
+}
+
+/// Define New Multilevel List's fields: the levels, their number format and position. Also the
+/// list style dialog's Format › Numbering… (#3805).
+pub(crate) fn list_fields(ui: &mut Ui, f: &mut ListForm) {
     let unit = crate::options::unit();
     fn len(v: &mut f32, unit: wordcraft_geom::Unit) -> egui::DragValue<'_> {
         egui::DragValue::new(v).speed(0.01).range(-10.0..=22.0).measure(unit).max_decimals(2)
@@ -187,7 +215,7 @@ pub fn define_list(app: &mut WordApp, ui: &mut Ui, f: &mut ListForm) -> bool {
     });
     let i = f.level.min(LEVELS - 1);
     let styles = f.styles.clone();
-    let Some(l) = f.levels.get_mut(i) else { return true };
+    let Some(l) = f.levels.get_mut(i) else { return };
     heading(ui, "Number format");
     egui::Grid::new("mll_number").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
         ui.label(tl!("Enter formatting for number:"));
@@ -287,14 +315,9 @@ pub fn define_list(app: &mut WordApp, ui: &mut Ui, f: &mut ListForm) -> bool {
         ui.add_enabled(l.follow == "tab" && l.tab_on, len(&mut l.tab_at, unit));
         ui.end_row();
     });
-    let (ok, cancel) = buttons(ui, tl!("OK"));
-    if ok && let Err(e) = app.run("list.define", f.params()) {
-        app.status(e);
-    }
-    ok || cancel
 }
 
-fn style_label(s: &str) -> String {
+pub(crate) fn style_label(s: &str) -> String {
     match s {
         "" => tl!("None").to_string(),
         "•" => format!("• {}", tl!("Bullet")),
@@ -304,10 +327,15 @@ fn style_label(s: &str) -> String {
 
 /// All nine levels, each number at its aligned-at position followed by a grey line of text at
 /// its text indent; the level being edited in the text colour.
-fn preview(ui: &mut Ui, f: &ListForm) {
+pub(crate) fn preview(ui: &mut Ui, f: &ListForm) {
+    preview_width(ui, f, 300.0);
+}
+
+/// [`preview`] `width` points wide.
+pub(crate) fn preview_width(ui: &mut Ui, f: &ListForm, width: f32) {
     let t = Tokens::get(ui.ctx());
     let row = 19.0;
-    let (rect, _) = ui.allocate_exact_size(vec2(300.0, row * LEVELS as f32 + 8.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width.max(200.0), row * LEVELS as f32 + 8.0), Sense::hover());
     let p = ui.painter_at(rect);
     p.rect_filled(rect, 2.0, egui::Color32::WHITE);
     p.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, t.border_strong), egui::StrokeKind::Inside);

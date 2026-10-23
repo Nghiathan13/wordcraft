@@ -6,8 +6,9 @@
 use serde_json::{Value, json};
 use wordcraft_doc::StoryRef;
 use wordcraft_doc::numbering::{Level, LevelSuffix, ListKind, levels_for};
-use wordcraft_doc::props::{Align, NumRef, Rgb, TextColor};
+use wordcraft_doc::props::{Align, NumRef, Rgb, TextColor, Underline};
 use wordcraft_doc::section::NumFormat;
+use wordcraft_doc::styles::{Style, StyleKind};
 
 use super::sel_result;
 use crate::{CmdError, CmdResult, CommandSpec, Session, p};
@@ -18,8 +19,13 @@ pub const LEVELS: usize = 9;
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("list.define", "Define New Multilevel List", "Home › Paragraph › Multilevel List", define).params(
-            r#"{"levels": [{"format"?: "decimal|lowerLetter|upperLetter|lowerRoman|upperRoman|decimalZero|ordinal|bullet|none", "text"?: "%1.%2." (%n = level n's number; the bullet character for bullet), "start"?: n, "restartAfter"?: 0-8 (0 = never; omit = the level above), "style"?: paragraph style linked to the level | null, "align"?: "left|center|right", "alignedAt"?: pt, "indentAt"?: pt, "follow"?: "tab|space|nothing", "tabAt"?: pt | null, "font"?: string | null, "bold"?: bool, "italic"?: bool, "color"?: "RRGGBB" | null, "legal"?: bool}, …] (index = level, up to 9; fields left out keep the base list's), "num"?: list id to change in place (default: a new list), "apply"?: bool (default true: number the selected paragraphs), "name"?: string}"#,
+            r#"{"levels": [{"format"?: "decimal|lowerLetter|upperLetter|lowerRoman|upperRoman|decimalZero|ordinal|bullet|none", "text"?: "%1.%2." (%n = level n's number; the bullet character for bullet), "start"?: n, "restartAfter"?: 0-8 (0 = never; omit = the level above), "style"?: paragraph style linked to the level | null, "align"?: "left|center|right", "alignedAt"?: pt, "indentAt"?: pt, "follow"?: "tab|space|nothing", "tabAt"?: pt | null, "font"?: string | null, "size"?: pt | null, "bold"?: bool, "italic"?: bool, "underline"?: bool, "color"?: "RRGGBB" | null, "legal"?: bool}, …] (index = level, up to 9; fields left out keep the base list's), "num"?: list id to change in place (default: a new list), "apply"?: bool (default true: number the selected paragraphs), "name"?: string}"#,
         ),
+        CommandSpec::new("list.defineStyle", "Define New List Style", "Home › Paragraph › Multilevel List", define_style).params(
+            r#"{"name": string (a new list style; with "style", its new name), "style"?: an existing list style to change instead (name or id), "levels"?: [as list.define] (a new style starts from 1) a) i) (1) (a) (i) 1. a. i.), "apply"?: bool (default true for a new style: the selected paragraphs take it)} → {"style", "num", …} — a list style: a named numbering style whose levels every list using it follows; changing it changes them all"#,
+        ),
+        CommandSpec::new("list.applyStyle", "List Styles", "Home › Paragraph › Multilevel List", apply_style_cmd)
+            .params(r#"{"style": a list style (name or id)} — the selected paragraphs join the list using that style"#),
         CommandSpec::new("list.get", "List Definition", "Home › Paragraph › Multilevel List", get)
             .params(r#"{"num"?: list id (default: the caret's list)} → {"num", "levels": [as list.define]}"#)
             .pure(),
@@ -55,8 +61,10 @@ pub fn level_json(l: &Level) -> Value {
         },
         "tabAt": l.tab,
         "font": l.chr.font,
+        "size": l.chr.size,
         "bold": l.chr.bold.unwrap_or(false),
         "italic": l.chr.italic.unwrap_or(false),
+        "underline": l.chr.underline.is_some_and(|u| u != Underline::None),
         "color": color,
         "legal": l.legal,
     })
@@ -196,6 +204,14 @@ pub fn level_from(mut l: Level, i: usize, v: &Value) -> Level {
     if let Some(b) = p::bool(v, "italic") {
         l.chr.italic = Some(b);
     }
+    match v.get("size") {
+        Some(Value::Null) => l.chr.size = None,
+        Some(_) => l.chr.size = p::f32(v, "size").filter(|x| x.is_finite()).map(|x| x.clamp(1.0, 1638.0)).or(l.chr.size),
+        None => {}
+    }
+    if let Some(b) = p::bool(v, "underline") {
+        l.chr.underline = Some(if b { Underline::Single } else { Underline::None });
+    }
     match v.get("color") {
         Some(Value::Null) => l.chr.color = None,
         Some(Value::String(s)) => l.chr.color = Rgb::parse(s).map(TextColor::Rgb).or(l.chr.color),
@@ -251,16 +267,22 @@ fn define(s: &mut Session, v: &Value) -> CmdResult {
         Some(n) => {
             // Change the list in place: every list sharing its definition follows.
             let aid = s.doc.numbering.num(n).map(|x| x.abstract_id).ok_or_else(|| CmdError::Params("no such list".into()))?;
+            let mut style = None;
             if let Some(a) = s.doc.numbering.abstracts.iter_mut().find(|a| a.id == aid) {
                 a.levels = levels.clone();
                 if name.is_some() {
                     a.name = name;
                 }
+                style = a.style_link.clone();
             }
             if let Some(x) = s.doc.numbering.nums.iter_mut().find(|x| x.id == n) {
                 x.level_overrides.clear();
             }
-            let sharing: Vec<u32> = s.doc.numbering.nums.iter().filter(|x| x.abstract_id == aid).map(|x| x.id).collect();
+            let mut sharing: Vec<u32> = s.doc.numbering.nums.iter().filter(|x| x.abstract_id == aid).map(|x| x.id).collect();
+            // A list style's definition: the lists using the style follow it.
+            if let Some(st) = style {
+                sharing.extend(s.doc.numbering.sync_style(&st));
+            }
             touch_lists(s, &sharing)?;
             n
         }
@@ -292,6 +314,153 @@ fn define(s: &mut Session, v: &Value) -> CmdResult {
             }
         })?;
     }
+    let mut r = sel_result(s)?;
+    r["num"] = json!(num);
+    Ok(r)
+}
+
+/// A new list style's levels: 1) a) i), then (1) (a) (i), then 1. a. i., each level a quarter
+/// inch further in.
+pub fn list_style_levels() -> Vec<Level> {
+    (0..LEVELS)
+        .map(|i| {
+            let n = i + 1;
+            let format = [NumFormat::Decimal, NumFormat::LowerLetter, NumFormat::LowerRoman].get(i % 3).copied().unwrap_or_default();
+            let text = match i / 3 {
+                0 => format!("%{n})"),
+                1 => format!("(%{n})"),
+                _ => format!("%{n}."),
+            };
+            Level { format, text, indent: 18.0 * n as f32, hanging: 18.0, ..Level::default() }
+        })
+        .collect()
+}
+
+/// The list style named or with id `name`: its id, if it is one.
+fn list_style(s: &Session, name: &str) -> Option<String> {
+    s.doc.styles.find(name).filter(|st| st.kind == StyleKind::Numbering).map(|st| st.id.clone())
+}
+
+/// The abstract list defining list style `id`: the one linked to it, else the list its paragraph
+/// properties name (a style from a file without the link), which then gets the link.
+fn style_definition(s: &mut Session, id: &str) -> Option<u32> {
+    if let Some(a) = s.doc.numbering.style_definition(id) {
+        return Some(a.id);
+    }
+    let num = s.doc.styles.get(id)?.para.numbering.filter(|n| n.num != 0)?.num;
+    let aid = s.doc.numbering.num(num)?.abstract_id;
+    let a = s.doc.numbering.abstracts.iter_mut().find(|a| a.id == aid)?;
+    a.style_link = Some(id.to_string());
+    a.num_style_link = None;
+    Some(aid)
+}
+
+/// Define New List Style (`list.defineStyle`, #3805): a new list style, or a change to one. A
+/// list style is a numbering style (`StyleKind::Numbering`) whose paragraph properties name a list
+/// whose definition is linked to it (`w:styleLink`); lists using the style link their own
+/// definition to it (`w:numStyleLink`) and keep a copy of its levels, updated whenever the style
+/// changes ([`wordcraft_doc::numbering::Numbering::sync_style`]).
+fn define_style(s: &mut Session, v: &Value) -> CmdResult {
+    let given: Vec<Value> = match v.get("levels") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a)) => a.iter().take(LEVELS).cloned().collect(),
+        Some(_) => return Err(CmdError::Params("`levels` must be an array".into())),
+    };
+    let name = p::str(v, "name").map(|n| n.trim().chars().take(253).collect::<String>()).filter(|n| !n.is_empty());
+    let (id, aid, new) = match p::str(v, "style") {
+        Some(st) => {
+            let id = list_style(s, st).ok_or_else(|| CmdError::Params(format!("`{st}` is not a list style")))?;
+            if let Some(n) = &name
+                && s.doc.styles.find(n).is_some_and(|x| x.id != id)
+            {
+                return Err(CmdError::Failed(format!("a style named `{n}` already exists")));
+            }
+            let aid = style_definition(s, &id).ok_or_else(|| CmdError::Failed(format!("list style `{st}` has no list definition")))?;
+            (id, aid, false)
+        }
+        None => {
+            let n = name.clone().ok_or_else(|| CmdError::Params("`name` is required for a new list style".into()))?;
+            if s.doc.styles.find(&n).is_some() {
+                return Err(CmdError::Failed(format!("a style named `{n}` already exists")));
+            }
+            let id = s.doc.styles.new_id(&n);
+            let num = s.doc.numbering.try_add_levels(None, list_style_levels())?;
+            let aid = s.doc.numbering.num(num).map(|x| x.abstract_id).ok_or_else(|| CmdError::Failed("the list wasn't added".into()))?;
+            if let Some(a) = s.doc.numbering.abstracts.iter_mut().find(|a| a.id == aid) {
+                a.style_link = Some(id.clone());
+            }
+            let mut st = Style { id: id.clone(), name: n, kind: StyleKind::Numbering, priority: Some(99), ..Default::default() };
+            st.para.numbering = Some(NumRef { num, level: 0 });
+            s.doc.styles.upsert(st);
+            (id, aid, true)
+        }
+    };
+    let base = s.doc.numbering.abstracts.iter().find(|a| a.id == aid).map(|a| a.levels.clone()).unwrap_or_else(list_style_levels);
+    let levels: Vec<Level> = (0..LEVELS)
+        .map(|i| {
+            let l = base.get(i).cloned().unwrap_or_else(|| default_level(i));
+            match given.get(i) {
+                Some(lv) if lv.is_object() => level_from(l, i, lv),
+                _ => l,
+            }
+        })
+        .collect();
+    if let Some(a) = s.doc.numbering.abstracts.iter_mut().find(|a| a.id == aid) {
+        a.levels = levels;
+    }
+    if !new && let (Some(n), Some(st)) = (name, s.doc.styles.get_mut(&id)) {
+        st.name = n;
+    }
+    // Every list on the definition or using the style shows the new levels.
+    let mut nums: Vec<u32> = s.doc.numbering.nums.iter().filter(|x| x.abstract_id == aid).map(|x| x.id).collect();
+    nums.extend(s.doc.numbering.sync_style(&id));
+    touch_lists(s, &nums)?;
+    let num = if p::bool(v, "apply").unwrap_or(new) { Some(apply_style(s, &id)?) } else { None };
+    let mut r = sel_result(s)?;
+    r["style"] = json!(id);
+    r["num"] = json!(num);
+    Ok(r)
+}
+
+/// The selected paragraphs join the list using list style `id`: the document's first list using
+/// it, so the style numbers on from one use to the next, else a new one linked to it. Paragraphs
+/// already in a list keep their level.
+fn apply_style(s: &mut Session, id: &str) -> Result<u32, CmdError> {
+    let using: Vec<u32> =
+        s.doc.numbering.abstracts.iter().filter(|a| a.num_style_link.as_deref() == Some(id) && a.style_link.is_none()).map(|a| a.id).collect();
+    let existing = s.doc.numbering.nums.iter().find(|n| using.contains(&n.abstract_id)).map(|n| n.id);
+    let num = match existing {
+        Some(n) => n,
+        None => {
+            let aid = style_definition(s, id).ok_or_else(|| CmdError::Failed(format!("list style `{id}` has no list definition")))?;
+            let levels = s.doc.numbering.abstracts.iter().find(|a| a.id == aid).map(|a| a.levels.clone()).unwrap_or_default();
+            let num = s.doc.numbering.try_add_levels(None, levels)?;
+            let new_aid = s.doc.numbering.num(num).map(|x| x.abstract_id);
+            if let Some(a) = s.doc.numbering.abstracts.iter_mut().find(|a| Some(a.id) == new_aid) {
+                a.num_style_link = Some(id.to_string());
+            }
+            num
+        }
+    };
+    super::para::fmt(s, &|pp| {
+        let level = pp.numbering.filter(|n| n.num != 0).map(|n| n.level).unwrap_or(0);
+        pp.numbering = Some(NumRef { num, level });
+        pp.indent_left = None;
+        pp.indent_first = None;
+        pp.indent_left_chars = None;
+        pp.indent_first_chars = None;
+        if pp.style.is_none() || pp.style.as_deref() == Some("Normal") {
+            pp.style = Some("ListParagraph".into());
+        }
+    })?;
+    Ok(num)
+}
+
+/// List Styles (`list.applyStyle`): the selected paragraphs take a list style.
+fn apply_style_cmd(s: &mut Session, v: &Value) -> CmdResult {
+    let st = p::req_str(v, "style")?;
+    let id = list_style(s, st).ok_or_else(|| CmdError::Params(format!("`{st}` is not a list style")))?;
+    let num = apply_style(s, &id)?;
     let mut r = sel_result(s)?;
     r["num"] = json!(num);
     Ok(r)
@@ -670,5 +839,123 @@ mod tests {
         let chr = s.doc.numbering.abstract_of(num).unwrap().levels[0].chr.clone();
         assert_eq!((chr.size, chr.underline, chr.caps), (Some(14.0), Some(wordcraft_doc::props::Underline::Single), Some(true)));
         assert!(s.run("para.defineNumber", &json!({"props": {"size": "big"}})).is_err());
+    }
+
+    /// Paragraphs "One", "Two", "Three", all selected.
+    fn three() -> Session {
+        let mut s = Session::new(Document::new());
+        for (i, t) in ["One", "Two", "Three"].iter().enumerate() {
+            if i > 0 {
+                s.run("text.newParagraph", &json!({})).unwrap();
+            }
+            s.run("text.insert", &json!({"text": t})).unwrap();
+        }
+        s.run("select.all", &json!({})).unwrap();
+        s
+    }
+
+    /// Select body paragraph `i`.
+    fn select_para(s: &mut Session, i: usize) {
+        s.sel = crate::Selection::caret(wordcraft_doc::Pos::body(i, 0));
+    }
+
+    /// #3805: Define New List Style makes a numbering style whose definition is linked to it, and
+    /// numbers the selection with it; a second use numbers on; changing the style changes every
+    /// list using it, in one undo step.
+    #[test]
+    fn a_list_style_numbers_lists_that_follow_it() {
+        let mut s = three();
+        select_para(&mut s, 0);
+        let r = s.run("list.defineStyle", &json!({"name": "Steps"})).unwrap();
+        let id = r["style"].as_str().unwrap().to_string();
+        let st = s.doc.styles.get(&id).unwrap();
+        assert_eq!((st.kind, st.name.as_str()), (wordcraft_doc::StyleKind::Numbering, "Steps"));
+        let def = s.doc.numbering.style_definition(&id).expect("the style's definition is linked to it");
+        let style_num = st.para.numbering.unwrap().num;
+        assert_eq!(s.doc.numbering.abstract_of(style_num).map(|a| a.id), Some(def.id));
+        // The list the paragraph joined uses the style (its own definition links to it).
+        let num = r["num"].as_u64().unwrap() as u32;
+        assert_eq!(s.doc.numbering.abstract_of(num).unwrap().num_style_link.as_deref(), Some(id.as_str()));
+        // A second use, two paragraphs on, numbers on from the first.
+        select_para(&mut s, 2);
+        s.run("list.applyStyle", &json!({"style": "Steps"})).unwrap();
+        assert_eq!(labels(&mut s), ["1)", "2)"]);
+        // Changing the style changes both, in one step.
+        s.run("list.defineStyle", &json!({"style": "Steps", "levels": [{"text": "Step %1:", "bold": true}]})).unwrap();
+        assert_eq!(labels(&mut s), ["Step 1:", "Step 2:"]);
+        assert_eq!(s.doc.numbering.level(num, 0).unwrap().chr.bold, Some(true));
+        s.run("edit.undo", &json!({})).unwrap();
+        assert_eq!(labels(&mut s), ["1)", "2)"]);
+    }
+
+    /// #3805: a list style and the lists using it stay linked through a save to .docx and back
+    /// (`w:styleLink` on the style's definition, `w:numStyleLink` on the lists using it), so
+    /// changing the style after reopening still changes them.
+    #[test]
+    fn a_list_style_stays_linked_through_docx() {
+        let mut s = three();
+        s.run("list.defineStyle", &json!({"name": "Steps", "levels": [{"text": "(%1)"}]})).unwrap();
+        assert_eq!(labels(&mut s), ["(1)", "(2)", "(3)"]);
+        let bytes = wordcraft_docx::write(&s.doc).unwrap();
+        let mut b = Session::new(wordcraft_docx::read(&bytes).unwrap());
+        assert_eq!(labels(&mut b), ["(1)", "(2)", "(3)"]);
+        let id = b.doc.styles.find("Steps").map(|st| st.id.clone()).unwrap();
+        assert_eq!(b.doc.styles.get(&id).unwrap().kind, wordcraft_doc::StyleKind::Numbering);
+        assert!(b.doc.numbering.style_definition(&id).is_some(), "w:styleLink read back");
+        assert!(b.doc.numbering.abstracts.iter().any(|a| a.num_style_link.as_deref() == Some(id.as_str())), "w:numStyleLink read back");
+        b.run("list.defineStyle", &json!({"style": "Steps", "levels": [{"text": "%1 –"}]})).unwrap();
+        assert_eq!(labels(&mut b), ["1 –", "2 –", "3 –"]);
+    }
+
+    /// #3805: a list style from a file that names its list only in the style's paragraph
+    /// properties (no `w:styleLink`) is taken as that list's style: changing it changes the lists
+    /// linked to it, and the link is written on save.
+    #[test]
+    fn a_list_style_without_a_style_link_takes_its_list_as_its_definition() {
+        let mut s = three();
+        let def = s.doc.numbering.try_add_levels(None, wordcraft_doc::numbering::levels_for(wordcraft_doc::ListKind::Numbered)).unwrap();
+        let mut st = wordcraft_doc::styles::Style {
+            id: "Legacy".into(),
+            name: "Legacy".into(),
+            kind: wordcraft_doc::StyleKind::Numbering,
+            ..Default::default()
+        };
+        st.para.numbering = Some(wordcraft_doc::props::NumRef { num: def, level: 0 });
+        s.doc.styles.upsert(st);
+        let using = s.doc.numbering.try_add_levels(None, wordcraft_doc::numbering::levels_for(wordcraft_doc::ListKind::Numbered)).unwrap();
+        let aid = s.doc.numbering.num(using).unwrap().abstract_id;
+        s.doc.numbering.abstracts.iter_mut().find(|a| a.id == aid).unwrap().num_style_link = Some("Legacy".into());
+        for path in s.doc.para_paths(wordcraft_doc::StoryRef::Body) {
+            let p = s.doc.para_mut(wordcraft_doc::StoryRef::Body, &path).unwrap();
+            p.props.numbering = Some(wordcraft_doc::props::NumRef { num: using, level: 0 });
+            p.touch();
+        }
+        s.relayout();
+        assert_eq!(labels(&mut s), ["1.", "2.", "3."]);
+        s.run("list.defineStyle", &json!({"style": "Legacy", "levels": [{"format": "upperRoman"}]})).unwrap();
+        assert_eq!(labels(&mut s), ["I.", "II.", "III."]);
+        let back = wordcraft_docx::read(&wordcraft_docx::write(&s.doc).unwrap()).unwrap();
+        assert!(back.numbering.style_definition("Legacy").is_some(), "the link is written on save");
+    }
+
+    /// #3805: what Define New List Style refuses, without changing the document.
+    #[test]
+    fn define_list_style_refuses_bad_settings() {
+        let mut s = three();
+        assert!(s.run("list.defineStyle", &json!({})).is_err(), "a new style needs a name");
+        assert!(s.run("list.defineStyle", &json!({"name": "  "})).is_err());
+        assert!(s.run("list.defineStyle", &json!({"name": "Heading 1"})).is_err(), "a name in use");
+        assert!(s.run("list.defineStyle", &json!({"style": "Normal", "levels": []})).is_err(), "not a list style");
+        assert!(s.run("list.defineStyle", &json!({"name": "X", "levels": "1)"})).is_err());
+        assert!(s.run("list.applyStyle", &json!({"style": "Normal"})).is_err());
+        assert!(s.run("list.applyStyle", &json!({})).is_err());
+        assert!(s.doc.styles.find("X").is_none());
+        assert_eq!(labels(&mut s), Vec::<String>::new());
+        // A level's size and underline are taken and given back.
+        s.run("list.defineStyle", &json!({"name": "Big", "apply": false, "levels": [{"size": 16, "underline": true}]})).unwrap();
+        let id = s.doc.styles.find("Big").map(|st| st.id.clone()).unwrap();
+        let chr = &s.doc.numbering.style_definition(&id).unwrap().levels[0].chr;
+        assert_eq!((chr.size, chr.underline), (Some(16.0), Some(wordcraft_doc::props::Underline::Single)));
+        assert_eq!(labels(&mut s), Vec::<String>::new(), "apply: false numbers nothing");
     }
 }

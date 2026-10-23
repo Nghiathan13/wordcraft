@@ -87,6 +87,14 @@ pub struct AbstractNum {
     /// `None`: derived from the levels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multi_level_type: Option<String>,
+    /// The list style (a numbering style's id) this is the definition of (`w:styleLink`):
+    /// changing the style changes these levels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style_link: Option<String>,
+    /// The list style (a numbering style's id) whose definition this list uses (`w:numStyleLink`):
+    /// its levels are a copy of the style's, kept in step by [`Numbering::sync_style`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_style_link: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -251,6 +259,23 @@ impl Numbering {
             return Some(l);
         }
         self.abstract_of(num)?.levels.get(level as usize)
+    }
+    /// The definition of list style `style` (the abstract list linked to it by `w:styleLink`).
+    pub fn style_definition(&self, style: &str) -> Option<&AbstractNum> {
+        self.abstracts.iter().find(|a| a.style_link.as_deref() == Some(style))
+    }
+    /// Give every list using list style `style` (`w:numStyleLink`) the style's levels again,
+    /// after the style's definition changed. Returns the `num` ids whose levels changed.
+    pub fn sync_style(&mut self, style: &str) -> Vec<u32> {
+        let Some(levels) = self.style_definition(style).map(|a| a.levels.clone()) else { return Vec::new() };
+        let mut changed = Vec::new();
+        for a in self.abstracts.iter_mut().filter(|a| a.num_style_link.as_deref() == Some(style) && a.style_link.is_none()) {
+            if a.levels != levels {
+                a.levels = levels.clone();
+                changed.push(a.id);
+            }
+        }
+        self.nums.iter().filter(|n| changed.contains(&n.abstract_id)).map(|n| n.id).collect()
     }
     /// Create a new list of `kind`; returns the `num` id. List ids run out only past `u32::MAX`
     /// lists, more than memory holds; then nothing is added and the id is 0, "no list".
