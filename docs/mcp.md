@@ -13,7 +13,31 @@ Claude Code: `claude mcp add wordcraft -- wordcraft-cli mcp`.
 
 With `--connect`, the bridge sends the app's control key, which it reads from
 `WORDCRAFT_CONTROL_KEY` or from the key file the app writes at start. It sends the key only to
-loopback addresses; see [Keys](control-protocol.md#keys).
+loopback addresses; see [Keys](control-protocol.md#keys). The bridge serves even when the app
+isn't open yet: tool calls return "not reachable … will retry on each call" and succeed once the
+app's port opens (#4078), so a client that starts before WordCraft doesn't lose the server for
+its whole session.
+
+## Scripts from the command line
+
+`wordcraft-cli run --script job.json` (`--script -` reads standard input) runs the commands in a
+file, in order, exactly like repeated `--cmd`, and then saves. Use it to generate a DOCX and its
+PDF in one run without a window:
+
+```json
+{"template": "sample",
+ "commands": [{"command": "select.text", "params": {"text": "Membership"}},
+              {"command": "format.bold"},
+              "caret.docEnd"],
+ "save": ["out.docx", "out.pdf"]}
+```
+
+`file` (a document to open) and `template` are optional, and `--file` / `--template` on the command
+line win. A command is `{"command": id, "params": {…}}` or just the id. `save` is a path or a list;
+each output's format follows its extension. Relative `file` and `save` paths resolve against the
+script's folder (the working folder for stdin). `--cmd` flags run after the script's commands and
+`--save` after its outputs. A failing command stops the run with `command N (id): …` and exit
+status 1, and nothing is saved. Every output is checked (known extension, folder exists) before the first is written. Paths inside command params (a picture to insert, say) are relative to the working folder, not the script's. Scripts are capped at 4 MiB.
 
 ## Tracked changes by an agent
 
@@ -87,7 +111,7 @@ files it was given rather than guarding against other software on the computer.
 | `batch` | run several commands in order |
 | `new_document` | blank, sample, letter, resume, report |
 | `open_document` / `save_document` | docx, doc (open only), odt, rtf, html, md, tex, txt, json; save also pdf, png |
-| `type_text` | type at the caret (`paragraphs: true` splits lines into paragraphs) |
+| `type_text` | type at the caret (`paragraphs: true` splits lines into paragraphs, in one command and one Undo step: 10,000 lines take ~10 ms; the line breaks are plain breaks, so AutoCorrect doesn't run on them) |
 | `select_text` | select the n-th occurrence of some text |
 | `get_text` / `inspect_document` | read the document back (verify without screenshots) |
 | `render_page` | a page as PNG |

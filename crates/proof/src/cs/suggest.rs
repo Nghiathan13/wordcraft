@@ -1,11 +1,13 @@
 //! Czech suggestions: bounded MAP variants, REP replacements, KEY neighbours, TRY edits
-//! and a stem scan. All linguistic tables are read from the installed dictionary.
+//! and a stem scan. All linguistic tables are read from the installed dictionary, so Indonesian
+//! ([`crate::id`]) uses the same ranking with its own dictionary.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::affix::{AffixDict, Casing, capitalize, casing};
 
-const MAX_LETTERS: usize = 40;
+/// Longest word suggestions are looked for, in letters (Spanish shares the bound).
+pub(crate) const MAX_LETTERS: usize = 40;
 const MAX_MAP_CHANGES: usize = 4;
 const MAX_MAP_VARIANTS: usize = 4096;
 /// Stems the scan of round 6 expands.

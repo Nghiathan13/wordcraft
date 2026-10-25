@@ -483,6 +483,7 @@ fn widow_control_moves_a_three_line_paragraph_whole() {
         for (fill, shift) in (30usize..60).flat_map(|f| (0..15).step_by(2).map(move |s| (f, s))) {
             let filler = "Filler line.\n".repeat(fill);
             let mut d = Document::from_text(&format!("{filler}{}\nAfter.", "word ".repeat(words)));
+            d.styles.default_chr.font = Some("Source Sans 3".into());
             d.format_paragraphs(&Pos::body(0, 0), &Pos::body(0, 0), &|p| p.space_before = Some(shift as f32)).unwrap();
             let l = lay(&d);
             let pieces: Vec<(usize, usize)> = l
@@ -503,4 +504,111 @@ fn widow_control_moves_a_three_line_paragraph_whole() {
         }
     }
     assert!(split4, "the sweep never took the paragraph across a page break");
+}
+
+#[test]
+fn footer_border_limits_body() {
+    use wordcraft_doc::props::{Border, Borders, HeightRule};
+    let mut d = Document::from_text(&"Body line\n".repeat(40));
+    d.last_section.page_h = 400.0;
+    d.last_section.margin_bottom = 36.0;
+    d.last_section.footer = 16.0;
+    let mut table = wordcraft_doc::Table::new(1, 1, d.last_section.text_width());
+    table.rows[0].props.height = Some(160.0);
+    table.rows[0].props.height_rule = HeightRule::Exact;
+    table.props.borders = Some(Borders::all(Border::single(4.0)));
+    let id = d.add_part(PartKind::Footer, vec![Arc::new(Block::Table(table))]);
+    d.last_section.footers.default = Some(id);
+    for page in &lay(&d).pages {
+        let top = page
+            .footer
+            .iter()
+            .filter_map(|item| match item {
+                Placed::Rule { y0, y1, border, .. } if (y0 - y1).abs() < 0.01 => Some(y0 - border.width / 2.0),
+                _ => None,
+            })
+            .fold(f32::MAX, f32::min);
+        assert!(page.body.bottom() <= top + 0.01, "body {}, footer stroke {top}", page.body.bottom());
+    }
+}
+
+/// A section numbering its pages in lower-case roman shows them so in its footer when the body
+/// shows the page count (`NUMPAGES`): the footer laid out while paginating, before the section's
+/// number format is known, isn't taken for the page's own footer.
+#[test]
+fn a_roman_page_number_in_the_footer_stays_roman_with_the_page_count_in_the_body() {
+    let field = |instr: &str| InlineObject::Field {
+        instr: instr.into(),
+        result: String::new(),
+        locked: false,
+        dirty: false,
+        code: false,
+        form: String::new(),
+    };
+    let mut d = Document::new();
+    let mut fp = Paragraph::new();
+    fp.insert_object(0, field("PAGE"), &Default::default()).unwrap();
+    let id = d.add_part(PartKind::Footer, vec![para_block(fp)]);
+    d.last_section.footers.default = Some(id);
+    let mut np = Paragraph::with_text(" pages", Default::default());
+    np.insert_object(0, field("NUMPAGES"), &Default::default()).unwrap();
+    d.body = vec![para_block(np)];
+    d.body.extend(paras(&"word ".repeat(40), 40));
+    let mut end = Paragraph::with_text("end", Default::default());
+    end.section = Some(Box::new(d.last_section.clone()));
+    d.body.push(para_block(end));
+    d.body.extend(paras(&"word ".repeat(40), 120));
+    d.last_section.page_num_start = Some(1);
+    d.last_section.page_num_format = wordcraft_doc::section::NumFormat::LowerRoman;
+    let l = lay(&d);
+    let roman: Vec<_> = l.pages.iter().filter(|p| p.section == 1).collect();
+    assert!(roman.len() > 5);
+    for p in roman {
+        let glyphs: usize = p.footer.iter().map(|it| if let Placed::Lines { para, .. } = it { para.glyphs.len() } else { 0 }).sum();
+        let want = wordcraft_doc::section::NumFormat::LowerRoman.format(p.number);
+        assert_eq!(glyphs, want.chars().count(), "page {}: the footer should show {want}", p.number);
+    }
+}
+
+#[test]
+fn a_page_ends_when_a_multiple_spaced_lines_text_no_longer_fits() {
+    // Multiple spacing puts its extra leading below the text, and Word lets that leading of a
+    // page's last line run into the bottom margin: a multiple-spaced line stays on the page while
+    // its text ends above the margin (observed in Word at 1.15, 1.5 and double spacing: the page
+    // holds one more line than when the whole line box must fit, for shifts up to about the
+    // leading). Each shift moves the text down; on every page the last line's text ends within
+    // the margin, and the next line's would not.
+    use wordcraft_doc::props::LineSpacing;
+    for multiple in [1.15, 1.5, 2.0] {
+        let mut past_margin = 0;
+        for shift in (0..28).step_by(2) {
+            let mut d = Document::from_text(&"Several words wrap onto many lines of a long paragraph. ".repeat(60));
+            if let Some(wordcraft_doc::Block::Para(p)) = d.body.get_mut(0).map(Arc::make_mut) {
+                p.props.line_spacing = Some(LineSpacing::Multiple(multiple));
+                p.props.space_before = Some(shift as f32);
+                p.props.widow_control = Some(false);
+            }
+            let bottom = d.last_section.page_h - d.last_section.margin_bottom;
+            let l = lay(&d);
+            assert!(l.pages.len() >= 2, "{multiple} shift {shift}: the paragraph should run onto a second page");
+            let Some(Placed::Lines { y, para, l0, l1, .. }) =
+                l.pages[0].items.iter().find(|i| matches!(i, Placed::Lines { story: StoryRef::Body, .. }))
+            else {
+                panic!("{multiple} shift {shift}: no body lines on page 1")
+            };
+            let (first, last, next) = (&para.lines[*l0], &para.lines[*l1 - 1], &para.lines[*l1]);
+            let top = y + last.top - first.top;
+            let text_end = top + (last.baseline - last.top) + last.text_desc;
+            assert!(text_end <= bottom + 0.01, "{multiple} shift {shift}: the last line's text ends at {text_end}, below the margin at {bottom}");
+            let next_text_end = top + last.height + (next.baseline - next.top) + next.text_desc;
+            assert!(
+                next_text_end > bottom + 0.01,
+                "{multiple} shift {shift}: the next line's text would end at {next_text_end}, within the margin at {bottom}"
+            );
+            if top + last.height > bottom + 0.01 {
+                past_margin += 1;
+            }
+        }
+        assert!(past_margin > 0, "{multiple}: some shift should leave the last line's leading past the margin");
+    }
 }
