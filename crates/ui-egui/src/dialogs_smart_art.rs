@@ -371,9 +371,16 @@ pub fn key(app: &mut WordApp, key: egui::Key, m: egui::Modifiers) -> bool {
         return true;
     }
     let mut text = g.items.get(i).map_or(String::new(), |it| it.text.clone());
-    if text.pop().is_none() {
+    if text.is_empty() {
         return true;
     }
+    // As in body text: a whole grapheme (an emoji sequence, a letter with its combining marks),
+    // or one character in the scripts whose Backspace removes a sign at a time.
+    let from = match text.chars().next_back() {
+        Some(c) if wordcraft_doc::cluster::backspaces_by_char(c) => text.len() - c.len_utf8(),
+        _ => wordcraft_doc::cluster::prev_cluster(&text, text.len()),
+    };
+    text.truncate(from);
     if app.smart_art_typing == Some(i) {
         app.session.join_next_undo();
     }
@@ -518,6 +525,69 @@ mod tests {
         let levels: Vec<u64> = v["items"].as_array().unwrap().iter().map(|i| i["level"].as_u64().unwrap()).collect();
         assert_eq!(levels, [0, 1, 1, 2, 2]);
         assert_eq!(items_with(&g, 0, "Boss")["items"][0]["text"], "Boss");
+    }
+
+    /// #2467 review: a graphic turned or mirrored (from a file: SmartArt can't be turned here)
+    /// still picks the item whose shape is under the pointer. The point is worked out on its own:
+    /// the item's centre in the graphic, mirrored, then turned about the frame's centre.
+    #[test]
+    fn a_turned_or_flipped_graphic_picks_the_item_under_the_pointer() {
+        let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        app.run("insert.smartArt", json!({"layout": "hierarchy"})).unwrap();
+        for (deg, flip_h, flip_v) in [(90.0, false, false), (0.0, true, false), (0.0, false, true), (45.0, true, false), (200.0, false, true)] {
+            let (pos, _) = wordcraft_engine::cmd::objects::selected(&app.session).expect("the graphic is selected");
+            let para = app.session.doc.para_mut(pos.story, &pos.path).unwrap();
+            let float = para.objects.iter_mut().find_map(|o| o.float_mut()).expect("the graphic's frame");
+            float.set_spin(wordcraft_geom::Spin::new(deg, flip_h, flip_v));
+            para.touch();
+            app.session.relayout();
+            let layout = app.session.layout();
+            let (hit, _) = crate::objects::active(&app, &layout).expect("the graphic is on the page");
+            assert_eq!((hit.spin.flip_h, hit.spin.flip_v), (flip_h, flip_v), "the layout carries the spin");
+            let (scale, page) = (1.5, Rect::from_min_size(pos2(40.0, 30.0), vec2(918.0, 1188.0)));
+            let pages = vec![page; hit.page + 1];
+            let g = wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session).unwrap();
+            for item in [0, 3] {
+                let [x, y, w, h] = wordcraft_engine::cmd::smart_art::item_box(&g, hit.rect.w, hit.rect.h, item).unwrap();
+                let (mut u, mut v) = (x + w / 2.0, y + h / 2.0);
+                if flip_h {
+                    u = hit.rect.w - u;
+                }
+                if flip_v {
+                    v = hit.rect.h - v;
+                }
+                let frame = crate::frame::to_screen(page, scale, hit.rect);
+                let (sin, cos) = deg.to_radians().sin_cos();
+                let (dx, dy) = (frame.min.x + u * scale - frame.center().x, frame.min.y + v * scale - frame.center().y);
+                let at = pos2(frame.center().x + dx * cos - dy * sin, frame.center().y + dx * sin + dy * cos);
+                assert_eq!(item_under(&app, &layout, &pages, scale, at), Some(item), "item {item} at {deg}° flip {flip_h}/{flip_v}");
+            }
+        }
+    }
+
+    /// #2467 review: Backspace in a picked item erases what it does in body text: a whole letter
+    /// with its combining marks, a whole emoji sequence; one sign at a time in Thai.
+    #[test]
+    fn backspace_in_a_picked_item_erases_a_whole_grapheme() {
+        let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        app.run("insert.smartArt", json!({"layout": "hierarchy"})).unwrap();
+        let text = |app: &WordApp| wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session).unwrap().items[3].text.clone();
+        let set = |app: &mut WordApp, t: &str| {
+            let g = wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session).unwrap();
+            app.run("smartArt.items", items_with(&g, 3, t)).unwrap();
+        };
+        app.smart_art_item = Some(3);
+        // "Việt" with the ệ's two marks apart, then a family emoji (a ZWJ sequence).
+        set(&mut app, "Vie\u{302}\u{323}t\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}");
+        assert!(key(&mut app, egui::Key::Backspace, egui::Modifiers::NONE));
+        assert_eq!(text(&app), "Vie\u{302}\u{323}t", "the whole emoji sequence goes");
+        for _ in 0..2 {
+            key(&mut app, egui::Key::Backspace, egui::Modifiers::NONE);
+        }
+        assert_eq!(text(&app), "Vi", "the letter goes with both its marks");
+        set(&mut app, "\u{0E01}\u{0E35}");
+        key(&mut app, egui::Key::Backspace, egui::Modifiers::NONE);
+        assert_eq!(text(&app), "\u{0E01}", "Thai: one sign at a time, as in body text");
     }
 
     /// #2832: the separators between the picker's columns made the dialog as tall as the window.
