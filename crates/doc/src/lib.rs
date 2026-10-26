@@ -1012,6 +1012,7 @@ impl Document {
             media,
             passthrough,
             glossary,
+            media_index: _,
         } = self;
         let Document {
             body: other_body,
@@ -1030,6 +1031,7 @@ impl Document {
             media: other_media,
             passthrough: other_passthrough,
             glossary: other_glossary,
+            media_index: _,
         } = other;
         same_blocks(body, other_body)
             && same_parts(parts, other_parts)
