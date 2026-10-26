@@ -25,6 +25,8 @@ pub(crate) struct ImeSpot {
     /// Placements left that follow the caret whatever came in: a click's frame places the caret
     /// before the click moves it, so the next frame follows it too, keys or not.
     follow: u8,
+    /// The last noted frame had a click and hasn't placed the caret yet.
+    click_frame: bool,
 }
 
 impl ImeSpot {
@@ -32,8 +34,15 @@ impl ImeSpot {
     /// has key, text or input-method events, `pointer` when it has a click, a tap or the window's
     /// focus. Keys win in a frame with both.
     pub(crate) fn note(&mut self, keys: bool, pointer: bool) {
+        // A click's frame that placed nothing (the canvas wasn't focused yet) leaves one follow:
+        // the next placement already has the caret where the click put it, and a second one
+        // would move the spot while the first keys come in.
+        if std::mem::take(&mut self.click_frame) {
+            self.follow = self.follow.min(1);
+        }
         if pointer {
             self.follow = 2;
+            self.click_frame = true;
         }
         if keys {
             self.typing = true;
@@ -46,6 +55,7 @@ impl ImeSpot {
     /// in since the last click ([`ImeSpot::note`]), when it stays where it was. A click's frame and
     /// the one after it follow the caret either way.
     pub(crate) fn place(&mut self, caret: Rect, xim: bool) -> Rect {
+        self.click_frame = false;
         let follow = self.follow > 0;
         self.follow = self.follow.saturating_sub(1);
         match self.shown {
@@ -108,5 +118,18 @@ mod tests {
         assert_eq!(frame(&mut s, 90.0, true, false, true), at(90.0), "the next frame, with a key");
         assert_eq!(frame(&mut s, 98.0, true, false, true), at(90.0), "typing holds it again");
         assert_eq!(frame(&mut s, 98.0, true, true, true), at(98.0), "a frame with a click and keys");
+    }
+
+    /// A click on a canvas that isn't focused places nothing in its frame: the first placement
+    /// after it follows the caret, and the first keys after that leave the spot (#2932 review).
+    #[test]
+    fn a_click_that_places_nothing_leaves_one_follow() {
+        let mut s = ImeSpot::default();
+        assert_eq!(frame(&mut s, 10.0, true, false, true), at(10.0));
+        assert_eq!(frame(&mut s, 18.0, true, false, true), at(10.0), "typing");
+        s.note(false, true);
+        s.note(false, false);
+        assert_eq!(frame(&mut s, 90.0, false, false, true), at(90.0), "the first placement, now focused");
+        assert_eq!(frame(&mut s, 98.0, true, false, true), at(90.0), "the first key leaves it");
     }
 }

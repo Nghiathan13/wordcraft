@@ -6978,6 +6978,60 @@ mod tests {
         }
     }
 
+    /// #2932 review: a click on a canvas that isn't focused places nothing in its own frame; the
+    /// first placement after it goes to the caret, and the first keys after that leave the spot.
+    #[test]
+    fn over_xim_a_click_that_focuses_the_canvas_then_typing_leaves_the_spot() {
+        let services = crate::Services { xim: true, ..Default::default() };
+        let app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), services);
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        for _ in 0..8 {
+            h.step();
+        }
+        let spot = |h: &egui_kittest::Harness<'_, WordApp>| h.output().platform_output.ime.as_ref().map(|ime| ime.rect.min.x).unwrap_or(f32::NAN);
+        h.event(egui::Event::Text("abcd".into()));
+        h.step();
+        h.step();
+        // Another widget takes the keyboard.
+        let (id, _) = h.state().canvas.widget_id.expect("the canvas");
+        h.ctx.memory_mut(|m| m.surrender_focus(id));
+        h.step();
+        h.step();
+        assert!(!h.state().canvas.focused, "the canvas lost the keyboard");
+        let page = h.state().canvas.page_rects.first().copied().expect("a page");
+        let at = egui::pos2(page.max.x - 10.0, page.min.y + 140.0);
+        h.event(egui::Event::PointerMoved(at));
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.step();
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.step();
+        let mut clicked = spot(&h);
+        for _ in 0..4 {
+            if h.state().canvas.focused && clicked.is_finite() {
+                break;
+            }
+            h.step();
+            clicked = spot(&h);
+        }
+        assert!(h.state().canvas.focused && clicked.is_finite(), "the click focuses the canvas and places the spot");
+        // The first key comes in the next frame.
+        h.event(egui::Event::Text("e".into()));
+        h.step();
+        assert_eq!(spot(&h), clicked, "the first key after the click leaves the spot");
+        h.event(egui::Event::Text("f".into()));
+        h.step();
+        assert_eq!(spot(&h), clicked, "typing leaves it");
+        let text = h.state().session.doc.plain_text(wordcraft_doc::StoryRef::Body);
+        assert!(text.contains("abcdef"), "the keys are typed: {text:?}");
+    }
+
     /// While an input method composes, the caret and the candidate window sit at its cursor inside
     /// the composition: the end of the range it reports, or the end of the text with no range. The
     /// range comes from the OS and is clamped, whatever it holds.
