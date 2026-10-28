@@ -482,8 +482,12 @@ fn lin_arg(a: &[MNode], s: &mut String, depth: usize) {
             }
         }
         lin_node(n, s, depth + 1);
-        if std::mem::take(&mut bare_den) && s.get(at..).and_then(|t| t.chars().next()).is_some_and(|c| !crate::math_linear::is_boundary(c)) {
-            s.insert(at, ' ');
+        // The first node that writes something follows the denominator; an empty run doesn't.
+        if bare_den && let Some(c) = s.get(at..).and_then(|t| t.chars().next()) {
+            bare_den = false;
+            if !crate::math_linear::is_boundary(c) {
+                s.insert(at, ' ');
+            }
         }
         if let MNode::Frac { den, .. } = n {
             bare_den = simple_operand(den);
@@ -940,9 +944,13 @@ mod tests {
         assert_eq!(to_linear(&[run("x="), half.clone(), run("+1")]), "x=3/2+1", "no space next to an operator");
         let mut group = parse_linear("(x+1)");
         group.insert(0, half.clone());
-        for n in [after, before, vec![half.clone(), half], group] {
+        for n in [after.clone(), before, vec![half.clone(), half.clone()], group] {
             assert_eq!(parse_linear(&to_linear(&n)), n, "{}", to_linear(&n));
         }
+        // An empty run between them writes nothing and doesn't use up the space (review).
+        let gap = vec![half, run(""), run("x")];
+        assert_eq!(to_linear(&gap), "3/2 x");
+        assert_eq!(parse_linear(&to_linear(&gap)), after);
         // A structure after a bare denominator is kept out of it the same way.
         assert!(matches!(parse_linear("1/π∑_(k=1)^n▒k").as_slice(), [MNode::Frac { .. }]), "unspaced, the sum is the denominator's");
         let n = parse_linear("1/π ∑_(k=1)^n▒k");
