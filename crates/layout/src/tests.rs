@@ -1320,16 +1320,25 @@ fn a_missing_roman_font_is_drawn_as_word_draws_it() {
 
 #[test]
 fn a_missing_font_is_drawn_in_its_font_table_alternate() {
-    // Measured in Word 2024 (#2702): a font that isn't installed is drawn in the alternate its font
-    // table names (`w:altName`), before the roman rule; an alternate that can't be drawn either
-    // leaves the roman rule (and then the generic substitutes) in charge.
-    let face = |alt: Option<&str>, roman: bool| {
+    // Measured in Word 2024 and Word for Windows 16.0.20527 (#2702): a font that isn't installed is
+    // drawn in the alternate its font table names (`w:altName`), before the roman rule; an
+    // alternate that can't be drawn either leaves the family class in charge: Cambria for a roman
+    // or modern font, the generic substitutes (Calibri in Word) for a swiss one.
+    #[derive(Clone, Copy)]
+    enum Family {
+        Swiss,
+        Roman,
+        Modern,
+    }
+    let face_of = |alt: Option<&str>, family: Family| {
         let mut d = Document::from_text("Lanterns");
         if let Some(alt) = alt {
             d.settings.font_alt_names = vec![("No Such Brand Font".into(), alt.into())];
         }
-        if roman {
-            d.settings.roman_fonts = vec!["No Such Brand Font".into()];
+        match family {
+            Family::Roman => d.settings.roman_fonts = vec!["No Such Brand Font".into()],
+            Family::Modern => d.settings.modern_fonts = vec!["No Such Brand Font".into()],
+            Family::Swiss => {}
         }
         let p = d.para_mut(StoryRef::Body, &Path::top(0)).unwrap();
         p.runs[0].props.font = Some("No Such Brand Font".into());
@@ -1338,6 +1347,7 @@ fn a_missing_font_is_drawn_in_its_font_table_alternate() {
         let first = para.clusters.first().expect("a cluster");
         para.styles[first.style as usize].face
     };
+    let face = |alt: Option<&str>, roman: bool| face_of(alt, if roman { Family::Roman } else { Family::Swiss });
     let resolve = |f: &str| wordcraft_fonts::word::resolve(f, false, false).face;
     let (courier, times, calibri, cambria) = (resolve("Courier New"), resolve("Times New Roman"), resolve("Calibri"), resolve("Cambria"));
     let generic = face(None, false);
@@ -1360,6 +1370,21 @@ fn a_missing_font_is_drawn_in_its_font_table_alternate() {
     // called that, so the roman rule or the generic substitutes draw it.
     assert_eq!(face(Some("No Such Alternate, Times New Roman"), false), generic);
     assert_eq!(face(Some("No Such Alternate, Times New Roman"), true), cambria);
+    // A modern font: its installed alternate draws it, a missing alternate leaves it in Cambria,
+    // and with no alternate at all it takes the generic substitutes (Calibri in Word).
+    assert_eq!(face_of(Some("Courier New"), Family::Modern), courier);
+    assert_eq!(face_of(Some("No Such Alternate"), Family::Modern), cambria);
+    assert_eq!(face_of(None, Family::Modern), generic);
+    // An alternate that names another missing font with an alternate of its own: the chain isn't
+    // followed.
+    let mut d = Document::from_text("Lanterns");
+    d.settings.font_alt_names = vec![("No Such Brand Font".into(), "No Such Alternate".into()), ("No Such Alternate".into(), "Courier New".into())];
+    let p = d.para_mut(StoryRef::Body, &Path::top(0)).unwrap();
+    p.runs[0].props.font = Some("No Such Brand Font".into());
+    let l = lay(&d);
+    let Some(Placed::Lines { para, .. }) = l.pages[0].items.iter().find(|i| matches!(i, Placed::Lines { .. })) else { panic!("no text") };
+    let first = para.clusters.first().expect("a cluster");
+    assert_eq!(para.styles[first.style as usize].face, generic, "the chain isn't followed");
 }
 
 #[test]

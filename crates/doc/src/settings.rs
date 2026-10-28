@@ -115,6 +115,10 @@ pub struct Settings {
     /// draws one that isn't installed in a serif face.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roman_fonts: Vec<String>,
+    /// Fonts the font table classes as modern (fixed pitch, `w:family w:val="modern"`): Word draws
+    /// one that isn't installed, and whose alternate isn't either, in a serif face (#2702).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modern_fonts: Vec<String>,
     /// Alternate names the document's font table gives its fonts (`w:font/w:altName`), as (font,
     /// alternate): Word draws a font that isn't installed in its alternate when that one is.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -292,6 +296,7 @@ impl Default for Settings {
             protect_hash: Vec::new(),
             compat_mode: COMPAT_MODE_CURRENT,
             roman_fonts: Vec::new(),
+            modern_fonts: Vec::new(),
             font_alt_names: Vec::new(),
             sum_paragraph_spacing: false,
             do_not_expand_shift_return: false,

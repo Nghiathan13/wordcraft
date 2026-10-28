@@ -3626,6 +3626,7 @@ fn font_alt_names_are_read_from_the_font_table() {
     let alts: Vec<(&str, &str)> = d.settings.font_alt_names.iter().map(|(f, a)| (f.as_str(), a.as_str())).collect();
     assert_eq!(alts, [("Museo Sans 300", "Calibri"), ("Brand Serif", "Times New Roman")]);
     assert_eq!(d.settings.roman_fonts, ["Brand Serif"]);
+    assert_eq!(d.settings.modern_fonts, ["Museo Sans 300"]);
 }
 
 /// The font table's two lists have limits of their own: a roman font listed after thousands of

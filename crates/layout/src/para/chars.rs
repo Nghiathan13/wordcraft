@@ -129,10 +129,12 @@ pub(super) const MISSING_ROMAN_FONT: &str = "Cambria";
 /// 1. in the alternate the font table names for it (`w:altName`), when that one can be drawn:
 ///    installed, or a font one of whose own substitutes is installed. That comes before the
 ///    family class: a roman font with an installed alternate is drawn in the alternate;
-/// 2. in [`MISSING_ROMAN_FONT`] when the font table classes it as roman, unless it is a Thai
-///    font (drawn in a Thai face, #1549), a symbol font, or a font with substitutes of its own
-///    (Times New Roman is roman in every font table, and where it isn't installed Liberation
-///    Serif has its metrics; Word never meets it missing);
+/// 2. in [`MISSING_ROMAN_FONT`] when the font table classes it as roman, or as modern with an
+///    alternate that can't be drawn either (a modern font with no alternate, and a swiss one with
+///    or without, take the generic substitutes, as Calibri does in Word). Not for a Thai font
+///    (drawn in a Thai face, #1549), a symbol font, or a font with substitutes of its own (Times
+///    New Roman is roman in every font table, and where it isn't installed Liberation Serif has
+///    its metrics; Word never meets it missing);
 /// 3. else as `font`, which [`wordcraft_fonts::word::resolve`] substitutes.
 pub(super) fn lookup_family<'f>(doc: &'f Document, font: &'f str) -> &'f str {
     let settings = &doc.settings;
@@ -154,9 +156,10 @@ pub(super) fn lookup_family<'f>(doc: &'f Document, font: &'f str) -> &'f str {
     if let Some(alt) = alternate.map(str::trim).filter(drawable) {
         return alt;
     }
+    let modern_alternate_missing = alternate.is_some() && settings.modern_fonts.iter().any(|f| f.eq_ignore_ascii_case(font));
     // Thai, symbol and fonts with substitutes of their own keep their name: those substitutes
     // draw them, Cambria wouldn't.
-    if roman
+    if (roman || modern_alternate_missing)
         && !wordcraft_fonts::word::is_thai_family(font)
         && !wordcraft_doc::symbol_fonts::is_symbol_font(font)
         && !wordcraft_fonts::word::has_named_substitutes(font)
