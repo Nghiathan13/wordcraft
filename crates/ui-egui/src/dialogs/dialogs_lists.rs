@@ -447,7 +447,8 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
     let width = 230.0;
     if f.format == "none" || !f.text.contains("%1") {
         let h = ui.spacing().interact_size.y;
-        ui.add(egui::TextEdit::singleline(&mut f.text).char_limit(64).desired_width(width).min_size(vec2(0.0, h)));
+        ui.add(egui::TextEdit::singleline(&mut f.text).char_limit(64).desired_width(width).min_size(vec2(0.0, h)))
+            .accessible_name(tl!("Number format:"));
         return;
     }
     let (mut before, mut after) = f.text.split_once("%1").map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
@@ -468,25 +469,30 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
             ui.allocate_ui_with_layout(vec2(width - 8.0, row), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.set_min_size(vec2(width - 8.0, row));
                 ui.spacing_mut().item_spacing.x = 1.0;
-                let id = ui.id().with("dnf_before");
+                // A text field is at least a field's height (egui's theme floor): these frameless
+                // pieces sit inside the box's frame, so they take the row's.
+                ui.spacing_mut().interact_size.y = row;
+                let id = ui.scope_id().with("dnf_before");
                 let before_id = id;
                 let at = cursor(ui, id);
                 // Empty, it takes no room: the number starts the box, as in Word.
                 let w = if before.is_empty() { 1.0 } else { measure(ui, &before) + 2.0 };
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut before)
-                        .id(id)
-                        .frame(egui::Frame::NONE)
-                        .char_limit(30)
-                        .desired_width(w)
-                        .margin(egui::Margin::ZERO),
-                );
+                let r = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut before)
+                            .id(id)
+                            .frame(egui::Frame::NONE)
+                            .char_limit(30)
+                            .desired_width(w)
+                            .margin(egui::Margin::ZERO),
+                    )
+                    .accessible_name(tl!("Text before the number"));
                 if r.has_focus() && pressed(ui, egui::Key::Delete) && at == Some(before.chars().count()) {
                     remove = true;
                 }
                 let sample = NumFormat::from_ooxml(&f.format).format(1);
                 let (rect, num) = ui.allocate_exact_size(vec2(measure(ui, &sample) + 8.0, row), Sense::click());
-                num.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Number")));
+                num.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Number")));
                 if num.clicked() {
                     num.request_focus();
                 }
@@ -498,7 +504,7 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
                 if num.has_focus() && (pressed(ui, egui::Key::Delete) || pressed(ui, egui::Key::Backspace)) {
                     remove = true;
                 }
-                let id = ui.id().with("dnf_after");
+                let id = ui.scope_id().with("dnf_after");
                 // From the number, Left or Home goes to the text before it, Right or End to after.
                 if num.has_focus() {
                     if pressed(ui, egui::Key::ArrowLeft) || pressed(ui, egui::Key::Home) {
@@ -508,14 +514,16 @@ fn number_format_box(ui: &mut Ui, f: &mut NumberForm) {
                     }
                 }
                 let at = cursor(ui, id);
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut after)
-                        .id(id)
-                        .frame(egui::Frame::NONE)
-                        .char_limit(30)
-                        .desired_width(f32::INFINITY)
-                        .margin(egui::Margin::ZERO),
-                );
+                let r = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut after)
+                            .id(id)
+                            .frame(egui::Frame::NONE)
+                            .char_limit(30)
+                            .desired_width(f32::INFINITY)
+                            .margin(egui::Margin::ZERO),
+                    )
+                    .accessible_name(tl!("Text after the number"));
                 if r.has_focus() && pressed(ui, egui::Key::Backspace) && at == Some(0) {
                     remove = true;
                 }
@@ -537,7 +545,7 @@ pub fn define_number(app: &mut WordApp, ui: &mut Ui, f: &mut NumberForm) -> bool
         let label = ui.label(tl!("Number style:"));
         ui.horizontal(|ui| {
             let current = number_styles().find(|(k, _)| *k == f.format).map(|(_, s)| s).unwrap_or("");
-            let combo = egui::ComboBox::from_id_salt("dnf_style").selected_text(style_label(current)).show_ui(ui, |ui| {
+            let combo = craft_ui::ComboBox::from_id_salt("dnf_style").selected_text(style_label(current)).show_ui(ui, |ui| {
                 for (k, s) in number_styles() {
                     if ui.selectable_label(f.format == k, style_label(s)).clicked() {
                         f.set_style(k);
@@ -889,7 +897,23 @@ mod tests {
     }
 
     /// #2787: Define New Number Format opens from the Numbering drop-down's command without
-    /// settings; the number in the format box deletes as one piece (style none) and comes back
+    /// settings, on `1.`, `2.`; the preview draws the number at the Font dialog's size, within
+    /// what its rows hold.
+    #[test]
+    fn define_new_number_format_opens_on_a_decimal_number() {
+        let mut a = app();
+        assert_eq!(a.run("para.defineNumber", json!({})).unwrap(), json!({"pending": "defineNumber"}));
+        let Some(Dialog::DefineNumber { form }) = &a.dialog else { panic!("dialog") };
+        assert_eq!((form.sample(1), form.sample(2)), ("1.".to_string(), "2.".to_string()));
+        let mut sized = (**form).clone();
+        assert_eq!(sized.preview_size(), 12.0);
+        for (size, want) in [(json!(16.0), 16.0), (json!(400.0), 20.0), (json!(1.0), 6.0), (json!("big"), 12.0)] {
+            sized.props.insert("size".into(), size);
+            assert_eq!(sized.preview_size(), want);
+        }
+    }
+
+    /// #2787: the number in the format box deletes as one piece (style none) and comes back
     /// where it stood with a number style; Font… opens the app's Font dialog for the number (OK
     /// keeps its formatting, Escape doesn't, neither formats text); OK numbers the paragraph in
     /// one step, a none format with its text; Cancel changes nothing.
@@ -898,17 +922,6 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.run("text.insert", json!({"text": "Clause"})).unwrap();
-        assert_eq!(a.run("para.defineNumber", json!({})).unwrap(), json!({"pending": "defineNumber"}));
-        let Some(Dialog::DefineNumber { form }) = &a.dialog else { panic!("dialog") };
-        assert_eq!((form.sample(1), form.sample(2)), ("1.".to_string(), "2.".to_string()));
-        // The preview draws the number at the Font dialog's size, within what its rows hold.
-        let mut sized = (**form).clone();
-        assert_eq!(sized.preview_size(), 12.0);
-        for (size, want) in [(json!(16.0), 16.0), (json!(400.0), 20.0), (json!(1.0), 6.0), (json!("big"), 12.0)] {
-            sized.props.insert("size".into(), size);
-            assert_eq!(sized.preview_size(), want);
-        }
-        a.dialog = None;
         let doc = a.session.doc.clone();
         // The dialog itself, clicked: state = (app, form, what the dialog returned).
         let mut form = super::NumberForm { text: "(%1)".into(), ..Default::default() };

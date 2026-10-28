@@ -145,7 +145,7 @@ pub(crate) fn number_font_dialog(app: &mut WordApp, props: &serde_json::Map<Stri
 pub(crate) fn show_number_font(app: &mut WordApp, ctx: &egui::Context, d: &mut Dialog) -> Option<bool> {
     let (mut open, mut close) = (true, false);
     egui::Window::new(tl!("Font"))
-        .id(egui::Id::new(("dialog", "Font", "number")))
+        .id(egui::Id::unique(("dialog", "Font", "number")))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -40.0))

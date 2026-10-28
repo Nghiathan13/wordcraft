@@ -40,8 +40,8 @@ pub use find::{FindExtra, FindTab, GoToWhat};
 use find::{command_matches, goto_page, swallow_shortcut_text};
 #[cfg(test)]
 use font::{apply_font, preview_size};
-pub(crate) use font::{number_font_dialog, number_font_result, show_number_font};
 use font::{east_asian_char, font_props};
+pub(crate) use font::{number_font_dialog, number_font_result, show_number_font};
 #[cfg(test)]
 use forms::custom_value_preview;
 pub use forms::{CellMarginsForm, CustomPropertiesForm, TableForm, table_grid_picker};
