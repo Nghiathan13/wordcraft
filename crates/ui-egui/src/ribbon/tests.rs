@@ -902,3 +902,31 @@ fn table_shading_split_keeps_palette_and_apply_separate() {
     h.state_mut().run("edit.undo", json!({})).unwrap();
     assert_eq!(first_cell_shading(h.state()), Some(wordcraft_doc::Rgb(255, 0, 0)), "No Color is undone in one step");
 }
+
+/// #1726 with #662: in a compact group the labelled split button drops its label and keeps only
+/// its icon and arrow, as small buttons do; its name stays for the tooltip and screen readers.
+#[test]
+fn a_labelled_split_button_shows_only_its_icon_when_compact() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    for compact in [false, true] {
+        let mut app = WordApp::new(Session::new(wordcraft_doc::Document::new()), crate::Services::default());
+        app.run("insert.table", json!({"rows": 2, "cols": 2})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(400.0, 100.0)).build_ui_state(
+            move |ui, app: &mut WordApp| {
+                crate::ribbon_fit::set_compact(ui.ctx(), compact);
+                let action = crate::widgets::ButtonAction::new("table.shading", json!({}), false);
+                crate::widgets::split_labeled(ui, app, "shadingNoBar", "Shading", action, None, |_, _| {});
+            },
+            app,
+        );
+        h.run_steps(2);
+        let button = h.get_by_role_and_label(Role::Button, "Shading").rect();
+        assert_eq!(painted_text_rect(h.output(), "Shading").is_some(), !compact, "compact: {compact}");
+        if compact {
+            assert_eq!(button.width(), 24.0, "only the icon");
+        } else {
+            assert!(button.width() > 30.0, "icon and label: {button:?}");
+        }
+    }
+}
