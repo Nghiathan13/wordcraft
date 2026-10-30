@@ -14,7 +14,8 @@ use wordcraft_doc::props::{TextDirection, TextVert, VAlign};
 use wordcraft_doc::{Block, Blocks, InlineObject, PartKind, Path, StoryRef, TextBody};
 use wordcraft_geom::Rect;
 
-use crate::{BoxContext, Ctx, Placed, fit_box, layout_box, natural_width};
+use crate::boxes::natural_width;
+use crate::{BoxInput, Ctx, Placed, fit_box, layout_box};
 
 /// Linked text boxes for one layout, worked out when a linked box is first laid out.
 #[derive(Default)]
@@ -90,9 +91,9 @@ fn lay(ctx: &mut Ctx, id: u32, blocks: &Blocks, len: f32, vert: TextVert, depth:
                 _ => b.clone(),
             })
             .collect();
-        return layout_box(ctx, story, &stacked, &[], STACK_WIDTH, BoxContext::Other, depth + 1, None).items;
+        return layout_box(ctx, BoxInput::other(story, &stacked, STACK_WIDTH, depth + 1, None)).items;
     }
-    layout_box(ctx, story, blocks, &[], len, BoxContext::Other, depth + 1, None).items
+    layout_box(ctx, BoxInput::other(story, blocks, len, depth + 1, None)).items
 }
 
 /// How long a line of text that doesn't wrap may run (the largest page side).
@@ -119,7 +120,7 @@ fn unwrapped_extent(ctx: &mut Ctx, id: u32, depth: usize) -> Option<(f32, f32)> 
     // Measured apart from where the text is shown: list numbers, equation numbers and the nested
     // boxes' budget count once.
     let snap = (ctx.counters.clone(), ctx.eq_count, ctx.boxes.clone());
-    let items = layout_box(ctx, StoryRef::Part(id), &blocks, &[], NO_WRAP_LEN, BoxContext::Other, depth + 1, None).items;
+    let items = layout_box(ctx, BoxInput::other(StoryRef::Part(id), &blocks, NO_WRAP_LEN, depth + 1, None)).items;
     (ctx.counters, ctx.eq_count, ctx.boxes) = snap;
     let widest = items
         .iter()
@@ -148,7 +149,7 @@ fn paras_widest(ctx: &mut Ctx, id: u32, blocks: &Blocks, depth: usize) -> f32 {
     // Measured apart from where the text is shown: list numbers, equation numbers and the nested
     // boxes' budget count once.
     let snap = (ctx.counters.clone(), ctx.eq_count, ctx.boxes.clone());
-    let items = layout_box(ctx, StoryRef::Part(id), &paras, &[], NO_WRAP_LEN, BoxContext::Other, depth + 1, None).items;
+    let items = layout_box(ctx, BoxInput::other(StoryRef::Part(id), &paras, NO_WRAP_LEN, depth + 1, None)).items;
     (ctx.counters, ctx.eq_count, ctx.boxes) = snap;
     items
         .iter()
@@ -321,6 +322,22 @@ struct Cut {
     byte: usize,
 }
 
+/// Most line lengths (and text directions) a chain's story is laid out at. Each lays the whole
+/// story out again and is kept while the chain is split, so a chain of boxes that each differ in
+/// width would multiply its story's layout work and memory. Past 16, a box whose length isn't
+/// among them takes the nearest narrower one laid out in its text direction, so its lines still
+/// fit across it (they stop short of its far edge), else the narrowest, whose lines are longer
+/// than the box. Far above a real chain's few box sizes.
+pub(crate) const MAX_FLOW_WIDTHS: usize = 16;
+
+/// Line lengths are told apart to a twentieth of a point (a twip): resized boxes a hair apart
+/// share one layout. Stacked text is laid out at [`STACK_WIDTH`] whatever the box's size. Text
+/// that `unwrap`s (runs its paragraphs on past the box's side, #2191) is laid out apart.
+fn flow_key(len: f32, vert: TextVert, unwrap: bool) -> (i32, TextVert, bool) {
+    let len = if vert == TextVert::Stacked { STACK_WIDTH } else { len };
+    ((len * 20.0).round() as i32, vert, unwrap)
+}
+
 /// Split the text of `chain`'s first box over its boxes.
 fn flow(ctx: &mut Ctx, chain: &[u32], depth: usize) -> Vec<Vec<Placed>> {
     let Some(&head) = chain.first() else { return Vec::new() };
@@ -334,7 +351,7 @@ fn flow(ctx: &mut Ctx, chain: &[u32], depth: usize) -> Vec<Vec<Placed>> {
     // time), sharing a layout with the boxes before it of the same length.
     let snap = (ctx.counters.clone(), ctx.eq_count);
     let mut after = None;
-    let mut layouts: Vec<((u32, TextVert, bool), Vec<Placed>)> = Vec::new();
+    let mut layouts: Vec<((i32, TextVert, bool), Vec<Placed>)> = Vec::new();
     let mut out = Vec::with_capacity(chain.len());
     // Where the next box's text starts: `Some(None)` at the beginning, `None` when all is shown.
     let mut start: Option<Option<Cut>> = Some(None);
@@ -350,8 +367,13 @@ fn flow(ctx: &mut Ctx, chain: &[u32], depth: usize) -> Vec<Vec<Placed>> {
         // at a paragraph; one picking up partway through a paragraph wraps it, or it would show
         // that paragraph again from its start.
         let unwrap = body.no_wrap && body.vert == TextVert::Horz && cut.as_ref().is_none_or(|c| c.byte == 0);
-        let key = (len.to_bits(), body.vert, unwrap);
-        let items = match layouts.iter().find(|(k, _)| *k == key) {
+        let key = flow_key(len, body.vert, unwrap);
+        // Past the cap the box takes the nearest layout in its direction (wrapped or not): the
+        // widest line length that fits it, else the narrowest. The first box in a direction is
+        // laid out (one more layout for each of the few directions at most).
+        let near = || layouts.iter().filter(|((_, v, u), _)| (*v, *u) == (key.1, key.2)).min_by_key(|((k, ..), _)| (*k > key.0, k.abs_diff(key.0)));
+        let kept = layouts.iter().find(|(k, _)| *k == key).or_else(|| if layouts.len() >= MAX_FLOW_WIDTHS { near() } else { None });
+        let items = match kept {
             Some((_, items)) => items.clone(),
             None => {
                 (ctx.counters, ctx.eq_count) = (snap.0.clone(), snap.1);
