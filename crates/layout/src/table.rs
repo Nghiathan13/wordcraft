@@ -27,6 +27,9 @@ pub struct RowLayout {
     pub edge: f32,
     /// The row's cells: the items each one owns and where its content ends.
     pub cells: Vec<CellPart>,
+    /// In Front of Text objects anchored in its cells, relative like `items`: they go over all
+    /// of the page's text, the rows and paragraphs after the table too (#1993).
+    pub on_top: Vec<Placed>,
 }
 
 /// A cell of a [`RowLayout`].
@@ -364,6 +367,8 @@ fn region_borders(parts: &[(TablePart, Borders)], (ri, nrows): (usize, usize), (
 
 struct CellBox {
     items: Vec<Placed>,
+    /// In Front of Text objects anchored in the cell, placed like `items`.
+    on_top: Vec<Placed>,
     h: f32,
     x: f32,
     w: f32,
@@ -614,8 +619,8 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
             let insets = margins[0] + margins[2] + band_t + band_b;
             let turn = cell.props.text_direction;
             let mut turned = None;
-            let (items, h) = if cell.props.vmerge == VMerge::Continue {
-                (Vec::new(), 0.0)
+            let (items, on_top, h) = if cell.props.vmerge == VMerge::Continue {
+                (Vec::new(), Vec::new(), 0.0)
             } else if turn.is_turned() {
                 collapsed = false;
                 // Turned text: its lines run along the cell's height. An exact row height sets
@@ -630,12 +635,15 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
                         natural_length(&probe).clamp(4.0, TURNED_MAX)
                     }
                 };
-                let BoxLayout { items, height, floats_bottom, .. } = layout_box(ctx, BoxInput::cell(story, &cell.blocks, &cpath, len, text, depth));
+                let BoxLayout { mut items, height, floats_bottom, on_top, .. } =
+                    layout_box(ctx, BoxInput::cell(story, &cell.blocks, &cpath, len, text, depth));
+                // Turned text keeps its In Front of Text objects in the cell: they turn with it.
+                items.extend(on_top);
                 let across = height.max(floats_bottom);
                 turned = Some(Turned { turn, len, across, snap, region, ci, top: margins[0] + band_t });
-                (items, len)
+                (items, Vec::new(), len)
             } else {
-                let BoxLayout { mut items, mut height, floats_bottom, last_top, .. } =
+                let BoxLayout { mut items, mut height, floats_bottom, last_top, mut on_top, .. } =
                     layout_box(ctx, BoxInput::cell(story, &cell.blocks, &cpath, cw, text, depth));
                 // A hidden end-of-cell mark: an empty last paragraph takes no room (Word for
                 // Windows: a row of empty such cells is only its borders).
@@ -644,11 +652,11 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
                 } else {
                     collapsed = false;
                 }
-                for it in &mut items {
+                for it in items.iter_mut().chain(on_top.iter_mut()) {
                     it.translate(x0 + margins[1], margins[0] + band_t);
                 }
                 // The cell grows to hold its floating tables.
-                (items, height.max(floats_bottom))
+                (items, on_top, height.max(floats_bottom))
             };
             let h = h + insets;
             let end = h - margins[2] - band_b;
@@ -662,6 +670,7 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
             }
             cells.push(CellBox {
                 items,
+                on_top,
                 h,
                 x: x0,
                 w: x1 - x0,
@@ -755,6 +764,7 @@ fn finish_table_rows(ctx: &mut Ctx, input: TableRows<'_>) -> TableLayout {
         let rh = heights.get(ri).copied().unwrap_or(0.0);
         let exact = t.rows.get(ri).is_some_and(|r| r.props.height_rule == HeightRule::Exact && r.props.height.is_some_and(|h| h > 0.0));
         let mut items = Vec::new();
+        let mut on_top = Vec::new();
         let mut parts = Vec::with_capacity(cells.len());
         for (ci, c) in cells.into_iter().enumerate() {
             let first = items.len();
@@ -828,6 +838,10 @@ fn finish_table_rows(ctx: &mut Ctx, input: TableRows<'_>) -> TableLayout {
                 it.translate(0.0, dy);
                 items.push(it);
             }
+            for mut it in c.on_top {
+                it.translate(0.0, dy);
+                on_top.push(it);
+            }
             let b = c.borders;
             let (x0, x1, y0, y1) = (c.x, c.x + c.w, 0.0, rh);
             // Horizontal edges run on over half of each visible vertical edge, so the corners
@@ -866,6 +880,7 @@ fn finish_table_rows(ctx: &mut Ctx, input: TableRows<'_>) -> TableLayout {
             bottom: bottoms.get(ri).copied().unwrap_or(0.0),
             edge: edges.get(ri).copied().unwrap_or(0.0),
             cells: parts,
+            on_top,
         });
     }
     TableLayout { x, width: total, rows: out }
@@ -1092,8 +1107,10 @@ pub fn split_row(row: &RowLayout, cut: f32) -> Option<(RowLayout, RowLayout)> {
     }
     // The part left on the page is placed and never split again.
     Some((
-        RowLayout { height: cut, items: a, bottom: row.bottom, edge: 0.0, cells: Vec::new() },
-        RowLayout { height, items: b, bottom: row.bottom, edge: row.edge, cells: parts },
+        // In Front of Text objects stay with the part left on the page, where their paragraph
+        // starts, as floating objects do.
+        RowLayout { height: cut, items: a, bottom: row.bottom, edge: 0.0, cells: Vec::new(), on_top: row.on_top.clone() },
+        RowLayout { height, items: b, bottom: row.bottom, edge: row.edge, cells: parts, on_top: Vec::new() },
     ))
 }
 

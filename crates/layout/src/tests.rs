@@ -3841,6 +3841,7 @@ fn split_row_rejects_a_hostile_cut() {
         items: vec![line(0.0), line(150.0)],
         bottom,
         cells: vec![CellPart { top: 2.0, items: 0..2, end: Some(170.0) }],
+        on_top: Vec::new(),
     };
     for cut in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -1.0, 200.0] {
         assert!(split_row(&row(200.0, 4.0), cut).is_none(), "{cut}");
@@ -5278,6 +5279,32 @@ fn in_front_of_text_in_a_cell_is_drawn_over_the_cell_text() {
     let (lines, shape) = lines_and_shape(&l.pages[0].items);
     assert_eq!(lines.len(), 3);
     assert!(lines.iter().all(|&k| k < shape), "drawn after the cell's lines {lines:?} {shape}");
+}
+
+/// #1993: one anchored in a table cell goes over the whole page, as in Word for Windows
+/// 16.0.17932: over the rows below its own and the paragraph after the table too, not only its
+/// cell's text.
+#[test]
+fn in_front_of_text_in_a_cell_is_drawn_over_the_rows_and_text_after_the_table() {
+    use wordcraft_doc::para::{Anchor, Float, Wrap};
+    let mut d = Document::from_text("Anchor row\nSecond row\nThird row\nAfter the table");
+    let f = Float { wrap: Wrap::InFrontOfText, h_rel: Anchor::Column, v_rel: Anchor::Paragraph, ..Default::default() };
+    d.insert_object(&Pos::body(0, 0), rect_shape(300.0, 200.0, f), &Default::default()).unwrap();
+    let mut table = Table::new(3, 1, 468.0);
+    for (row, block) in table.rows.iter_mut().zip(d.body.drain(..3)) {
+        row.cells[0].blocks = vec![block];
+    }
+    d.body.insert(0, std::sync::Arc::new(wordcraft_doc::Block::Table(table)));
+    let l = lay(&d);
+    let items = &l.pages[0].items;
+    let (lines, shape) = lines_and_shape(items);
+    assert_eq!(lines.len(), 4, "three rows and the paragraph after the table");
+    assert!(lines.iter().all(|&k| k < shape), "drawn after every line of the page {lines:?} {shape}");
+    let frame = items.iter().rposition(|i| matches!(i, Placed::Object { .. })).unwrap();
+    assert!(frame > shape, "its frame comes with it");
+    let r = shapes(items)[0];
+    let c = l.caret(&Pos::body(1, 0)).unwrap();
+    assert!(r.contains(wordcraft_geom::Point::new(c.x + 20.0, c.top + 2.0)), "the shape covers the paragraph after the table");
 }
 
 /// #1993: drawn last, an In Front of Text object still moves with its paragraph when the page is
@@ -7080,6 +7107,7 @@ fn a_split_row_moves_shading_below_the_cut_with_it() {
         items: vec![line_row(0.0), line_row(150.0), fill(0.0, 200.0), fill(150.0, 50.0)],
         bottom: 0.0,
         cells: vec![CellPart { top: 2.0, items: 0..4, end: None }],
+        on_top: Vec::new(),
     };
     let (a, b) = split_row(&row, 100.0).expect("splits");
     let fills = |r: &RowLayout| {
@@ -10336,6 +10364,7 @@ fn split_cell_moves_image_frame() {
             edge: 0.0,
             items: vec![kept, image, frame],
             cells: vec![CellPart { top, items: 0..3, end: Some(170.0) }],
+            on_top: Vec::new(),
         };
         let (first, rest) = split_row(&row, 100.0).unwrap();
         assert_eq!(first.items.len(), 1);
