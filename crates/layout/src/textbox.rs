@@ -98,8 +98,10 @@ fn lay(ctx: &mut Ctx, id: u32, blocks: &Blocks, len: f32, vert: TextVert, depth:
 
 /// How long a line of text that doesn't wrap may run (the largest page side).
 const NO_WRAP_LEN: f32 = 1584.0;
-/// Room a box fitted to text that doesn't wrap keeps past its widest line, so the line still fits.
+/// Room text that doesn't wrap is laid out with past its widest line, so the line still fits.
 const FIT_SLACK: f32 = 0.5;
+/// The widest outline a fitted box counts (the reader's cap on `a:ln` widths).
+const MAX_OUTLINE: f32 = 100.0;
 
 /// The widest line and the depth of text box `id`'s text when it doesn't wrap (Wrap text in
 /// shape off). None when it can't be told here, so the box keeps its own size: text running up,
@@ -180,13 +182,16 @@ fn widen_paras(ctx: &Ctx, blocks: &Blocks, room: f32) -> Blocks {
 }
 
 /// The size Word gives a text box that resizes to fit its text and doesn't wrap it: its widest
-/// line and its text's depth, inside its margins (#2191). None: the shape's own size.
+/// line and its text's depth, inside its margins, and its outline's width, drawn or not (Word
+/// for Windows: a 3 pt outline makes the box 3 pt wider and deeper, #2191). None: the shape's
+/// own size.
 pub(crate) fn fitted_size(ctx: &mut Ctx, o: &InlineObject, depth: usize) -> Option<(f32, f32)> {
-    let InlineObject::Shape { story: Some(id), .. } = o else { return None };
+    let InlineObject::Shape { story: Some(id), stroke_width, .. } = o else { return None };
     let body = ctx.doc.parts.get(id).filter(|p| p.kind == PartKind::TextBox && p.body.auto_fit)?.body;
     let (widest, deep) = unwrapped_extent(ctx, *id, depth)?;
     let [l, t, r, b] = body.insets_pt();
-    Some(((widest + FIT_SLACK + l + r).clamp(1.0, NO_WRAP_LEN), (deep + t + b).clamp(1.0, NO_WRAP_LEN)))
+    let line = wordcraft_geom::finite(*stroke_width).clamp(0.0, MAX_OUTLINE);
+    Some(((widest + l + r + line).clamp(1.0, NO_WRAP_LEN), (deep + t + b + line).clamp(1.0, NO_WRAP_LEN)))
 }
 
 /// The items showing text box `id` in its frame `rect` (page coordinates): its text, or its

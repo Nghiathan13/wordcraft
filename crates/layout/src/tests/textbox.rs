@@ -188,34 +188,57 @@ fn own_margins_and_resize_to_fit_keep_the_text_in_view() {
 /// a box whose text wraps keeps its size too.
 #[test]
 fn a_box_fitting_text_it_doesnt_wrap_takes_the_size_of_its_line() {
-    let caption = "(Figure 1.1) A time line of the important vaccines, on one line";
-    let at = |body: TextBody| {
-        let mut d = Document::from_text("x");
-        let id = text_box(&mut d, 0, caption, 144.0, 144.0, body);
-        let p = d.para_mut(StoryRef::Body, &Path::top(0)).unwrap();
-        if let Some(f) = p.objects.iter_mut().find_map(InlineObject::float_mut) {
-            f.wrap = wordcraft_doc::para::Wrap::Square;
-        }
-        p.touch();
-        let l = lay(&d);
-        let line = l.pages[0].items.iter().find_map(|it| match it {
-            Placed::Lines { story: StoryRef::Part(s), para, .. } if *s == id => Some((para.lines.len(), natural_width(para))),
-            _ => None,
-        });
-        (line.unwrap(), frame_of(&l, id))
-    };
     let [l, t, r, b] = TextBody::default().insets_pt();
-    let ((n, wide), frame) = at(TextBody { auto_fit: true, no_wrap: true, ..Default::default() });
+    let ((n, wide), frame) = square_caption(TextBody { auto_fit: true, no_wrap: true, ..Default::default() }, None, 0.0);
     assert_eq!(n, 1, "one line");
     assert!(wide > 200.0, "the line is wider than the box was: {wide}");
-    assert!((frame.w - (wide + l + r)).abs() < 1.0, "as wide as its line: {frame:?}, line {wide}");
+    assert!((frame.w - (wide + l + r)).abs() < 0.05, "as wide as its line: {frame:?}, line {wide}");
     assert!(frame.h > t + b + 5.0 && frame.h < t + b + 20.0, "one line deep: {frame:?}");
-    let ((n, wide), frame) = at(TextBody { no_wrap: true, ..Default::default() });
+    let ((n, wide), frame) = square_caption(TextBody { no_wrap: true, ..Default::default() }, None, 0.0);
     assert_eq!(n, 1, "one line, past the box's side");
     assert!(wide > 200.0 && (frame.w - 144.0).abs() < 0.01 && (frame.h - 144.0).abs() < 0.01, "its own size: {frame:?}");
-    let ((n, _), frame) = at(TextBody { auto_fit: true, ..Default::default() });
+    let ((n, _), frame) = square_caption(TextBody { auto_fit: true, ..Default::default() }, None, 0.0);
     assert!(n > 1, "the text wraps");
     assert!((frame.w - 144.0).abs() < 0.01 && (frame.h - 144.0).abs() < 0.01, "its own size: {frame:?}");
+}
+
+/// Word adds a fitted box's outline width to its size, drawn or not: no outline 354.6 × 19.6 pt,
+/// a 0.5 pt one 355.1 × 20.1, a 3 pt one (drawn or `a:noFill`) 357.6 × 22.6 (Word for Windows
+/// 16.0.17932, a synthetic caption box, #2191 review). The text stays the same size.
+#[test]
+fn a_fitted_box_also_takes_its_outlines_width() {
+    let body = TextBody { auto_fit: true, no_wrap: true, ..Default::default() };
+    let ((_, wide), bare) = square_caption(body, None, 0.0);
+    let grey = Some(wordcraft_doc::props::Rgb(0x80, 0x80, 0x80));
+    for (stroke, width) in [(grey, 0.5), (grey, 3.0), (None, 3.0)] {
+        let ((n, w), frame) = square_caption(body, stroke, width);
+        assert_eq!((n, w), (1, wide), "the same line ({stroke:?}, {width} pt)");
+        let grown = (frame.w - bare.w, frame.h - bare.h);
+        assert!((grown.0 - width).abs() < 0.01 && (grown.1 - width).abs() < 0.01, "{width} pt wider and deeper ({stroke:?}): {grown:?}");
+    }
+}
+
+/// A square-wrapped box holding a one-line caption, with outline `stroke` `width` pt wide: its
+/// first paragraph's line count and widest line, and its frame.
+fn square_caption(body: TextBody, stroke: Option<wordcraft_doc::props::Rgb>, width: f32) -> ((usize, f32), Rect) {
+    let mut d = Document::from_text("x");
+    let id = text_box(&mut d, 0, "(Figure 1.1) A time line of the important vaccines, on one line", 144.0, 144.0, body);
+    let p = d.para_mut(StoryRef::Body, &Path::top(0)).unwrap();
+    for o in &mut p.objects {
+        if let InlineObject::Shape { stroke: s, stroke_width, .. } = o {
+            (*s, *stroke_width) = (stroke, width);
+        }
+    }
+    if let Some(f) = p.objects.iter_mut().find_map(InlineObject::float_mut) {
+        f.wrap = wordcraft_doc::para::Wrap::Square;
+    }
+    p.touch();
+    let l = lay(&d);
+    let line = l.pages[0].items.iter().find_map(|it| match it {
+        Placed::Lines { story: StoryRef::Part(s), para, .. } if *s == id => Some((para.lines.len(), natural_width(para))),
+        _ => None,
+    });
+    (line.unwrap(), frame_of(&l, id))
 }
 
 /// A box whose text doesn't wrap but that also holds a table keeps its own width, also when it
