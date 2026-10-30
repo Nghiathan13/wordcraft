@@ -215,6 +215,8 @@ fn split_button(
     let label = (look.labeled && !crate::ribbon_fit::compact(ui.ctx()))
         .then(|| ui.painter().layout_no_wrap(tip.to_string(), regular(11.5), if on { t.text } else { t.text_disabled }));
     let text_w = label.as_ref().map_or(0.0, |g| g.size().x + 6.0);
+    // What a compact group gives back, so the ribbon can plan it before drawing it compact.
+    crate::ribbon_fit::add_saving(ui.ctx(), text_w);
     let (r, resp) = ui.allocate_exact_size(vec2(24.0 + text_w, 22.0), Sense::click());
     keytip_badge(ui, r, id, tip);
     let (ar, aresp) = ui.allocate_exact_size(vec2(11.0, 22.0), Sense::click());
