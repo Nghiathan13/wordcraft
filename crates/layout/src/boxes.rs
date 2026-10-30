@@ -4,6 +4,7 @@ use super::floats::{
 };
 use super::page::PageFrame;
 use super::placed::Placed;
+use super::table::OnTop;
 use super::table_flow::below;
 use super::{
     Anchor, Arc, Block, Blocks, Border, Document, Float, FloatAlign, HashMap, ParaLayout, Paragraph, Path, Rect, SectionProps, StoryRef, TableFloat,
@@ -63,7 +64,7 @@ struct TableBlockContext<'ctx, 'state, 'doc> {
     depth: usize,
     y: &'state mut f32,
     items: &'state mut Vec<Placed>,
-    on_top: &'state mut Vec<Placed>,
+    on_top: &'state mut Vec<OnTop>,
     exclusions: &'state mut Vec<WrapArea>,
     float_tables: &'state mut Vec<Rect>,
     table_areas: &'state mut Vec<Rect>,
@@ -173,10 +174,10 @@ fn layout_table_block(input: TableBlockContext<'_, '_, '_>) -> bool {
             item.translate(tx, row_y);
             items.push(item);
         }
-        for item in &row.on_top {
-            let mut item = item.clone();
-            item.translate(tx, row_y);
-            on_top.push(item);
+        for top in &row.on_top {
+            let mut top = top.clone();
+            top.translate(tx, row_y);
+            on_top.push(top);
         }
         row_y += row.height;
     }
@@ -348,7 +349,8 @@ pub(crate) fn layout_box(ctx: &mut Ctx, input: BoxInput<'_>) -> BoxLayout {
                     behind += back.len();
                     items.splice(at..at, back);
                     items.extend(front);
-                    on_top.extend(top);
+                    // Each goes with its paragraph's first line when a row splits.
+                    on_top.extend(top.into_iter().map(|item| OnTop { cell: 0, anchor: y + lead, item }));
                 }
                 // Automatic space after: none after the last paragraph of a cell or box.
                 let after = if pl.rp.after_auto && i + 1 == blocks.len() { 0.0 } else { pl.rp.space_after };
@@ -388,7 +390,7 @@ pub(crate) fn layout_box(ctx: &mut Ctx, input: BoxInput<'_>) -> BoxLayout {
     // In Front of Text goes over all of the box's text. A cell's goes further, over the rest of
     // the page (the rows and paragraphs after its table), so the table carries it up (#1993).
     if !in_cell {
-        items.append(&mut on_top);
+        items.extend(on_top.drain(..).map(|t| t.item));
     }
     BoxLayout { items, on_top, height: y.max(0.0), floats_bottom, last_top: last_top.max(0.0), table_areas, page_table_wraps }
 }
@@ -447,7 +449,7 @@ pub(crate) struct BoxLayout {
     pub(crate) items: Vec<Placed>,
     /// A table cell's In Front of Text objects, for its table to draw over the rest of the page
     /// (#1993). Empty for other boxes, whose `items` end with them.
-    pub(crate) on_top: Vec<Placed>,
+    pub(crate) on_top: Vec<OnTop>,
     pub(crate) table_areas: Vec<Rect>,
     pub(crate) page_table_wraps: Vec<WrapArea>,
     pub(crate) height: f32,

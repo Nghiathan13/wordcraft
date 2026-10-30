@@ -364,8 +364,8 @@ fn section_endnotes(ctx: &mut Ctx, pb: &mut PageBuilder, endnotes: &mut VecDeque
 fn finish_pages(pb: PageBuilder, doc: &Document, sections: &[(usize, &SectionProps)], web: bool) -> Vec<Page> {
     let mut pb = pb;
     pb.apply_valign();
-    pb.lift_on_top();
     pb.flush_notes();
+    pb.lift_on_top();
     let last_block = doc.body.len().saturating_sub(1);
     for _ in 0..MAX_NOTE_PAGES {
         if pb.carry.is_empty() {

@@ -5331,6 +5331,66 @@ fn in_front_of_text_moves_with_its_paragraph_under_vertical_alignment() {
     }
 }
 
+/// #1993: footnotes are page text too, so an In Front of Text object over the note area is drawn
+/// after them.
+#[test]
+fn in_front_of_text_is_drawn_over_the_footnotes() {
+    use wordcraft_doc::para::{Anchor, Float, Wrap};
+    let mut d = Document::from_text("Anchor paragraph");
+    let id = footnote(&mut d, &Pos::body(0, 6), "The note under the picture.");
+    let f = Float { wrap: Wrap::InFrontOfText, h_rel: Anchor::Page, v_rel: Anchor::Page, x: 72.0, y: 640.0, ..Default::default() };
+    d.insert_object(&Pos::body(0, 0), rect_shape(300.0, 80.0, f), &Default::default()).unwrap();
+    let l = lay(&d);
+    let items = &l.pages[0].items;
+    let note = items.iter().position(|i| matches!(i, Placed::Lines { story: StoryRef::Part(p), .. } if *p == id)).unwrap();
+    let shape = items.iter().position(|i| matches!(i, Placed::Shape { .. })).unwrap();
+    assert!(note < shape, "the note {note} is drawn before the shape {shape}");
+}
+
+/// #1993: turned cell text laid out again for a taller row keeps its In Front of Text objects.
+#[test]
+fn in_front_of_text_in_a_turned_cell_stays_when_the_row_grows() {
+    use wordcraft_doc::para::{Anchor, Float, Wrap};
+    let mut d = turned_table(TextDirection::Down, "Turned", None);
+    let f = Float { wrap: Wrap::InFrontOfText, h_rel: Anchor::Column, v_rel: Anchor::Paragraph, ..Default::default() };
+    d.insert_object(&Pos { story: StoryRef::Body, path: Path(vec![1, 0, 1, 0]), off: 0 }, rect_shape(20.0, 20.0, f), &Default::default()).unwrap();
+    let Some(Block::Table(t)) = d.body.get_mut(1).map(Arc::make_mut) else { panic!("table") };
+    // Another cell makes the row taller than the turned text needs.
+    t.rows[0].cells[0].blocks =
+        (0..12).map(|_| wordcraft_doc::para_block(wordcraft_doc::Paragraph::with_text("plain", Default::default()))).collect();
+    let l = lay(&d);
+    let b = turned_lines(&l).turned_bounds().unwrap();
+    assert!(b.h > 100.0, "the turned text runs the taller row: {b:?}");
+    assert_eq!(shapes(&l.pages[0].items).len(), 1, "the shape is still drawn");
+}
+
+/// #1993: when a row splits across pages, an In Front of Text object goes with its paragraph:
+/// one anchored in a paragraph that starts on the next page goes there too.
+#[test]
+fn in_front_of_text_goes_with_its_paragraph_when_a_row_splits() {
+    use wordcraft_doc::para::{Anchor, Float, Wrap};
+    let mut d = Document::from_text("before\nafter");
+    let mut t = Table::new(1, 1, 468.0);
+    let long = "Row text that keeps going and going so the cell grows taller than a page. ".repeat(120);
+    t.rows[0].cells[0].blocks = vec![
+        wordcraft_doc::para_block(wordcraft_doc::Paragraph::with_text(&long, Default::default())),
+        wordcraft_doc::para_block(wordcraft_doc::Paragraph::with_text("Anchor paragraph", Default::default())),
+    ];
+    d.insert_block(StoryRef::Body, &Path::top(1), wordcraft_doc::Block::Table(t)).unwrap();
+    let f = Float { wrap: Wrap::InFrontOfText, h_rel: Anchor::Column, v_rel: Anchor::Paragraph, ..Default::default() };
+    let cell_para = |k| Pos { story: StoryRef::Body, path: Path(vec![1, 0, 0, k]), off: 0 };
+    d.insert_object(&cell_para(0), rect_shape(50.0, 20.0, f.clone()), &Default::default()).unwrap();
+    d.insert_object(&cell_para(1), rect_shape(80.0, 20.0, f), &Default::default()).unwrap();
+    let l = lay(&d);
+    let anchor = l.caret(&cell_para(1)).unwrap();
+    assert!(anchor.page > 0, "the second paragraph starts on a later page");
+    let widths = |p: usize| shapes(&l.pages[p].items).iter().map(|r| r.w).collect::<Vec<_>>();
+    assert_eq!(widths(0), [50.0], "the first paragraph's shape stays where it starts");
+    assert_eq!(widths(anchor.page), [80.0], "the second's goes on with it");
+    let r = shapes(&l.pages[anchor.page].items)[0];
+    assert!((r.y - anchor.top).abs() < 5.0, "at its paragraph: {r:?} {anchor:?}");
+}
+
 #[test]
 fn top_and_bottom_float_pushes_its_own_first_line_down() {
     use wordcraft_doc::para::{Anchor, Float, Wrap};

@@ -160,8 +160,8 @@ pub(crate) fn place_table(ctx: &mut Ctx, pb: &mut PageBuilder, t: &wordcraft_doc
         // In Front of Text objects in its cells go over the rest of the page too (#1993).
         pb.push_on_top(
             at,
-            row.on_top.iter().map(|it| {
-                let mut it = it.clone();
+            row.on_top.iter().map(|t| {
+                let mut it = t.item.clone();
                 it.translate(x, y);
                 it
             }),
@@ -301,8 +301,8 @@ fn place_floating_table(ctx: &mut Ctx, pb: &mut PageBuilder, tl: &table::TableLa
                     it.translate(r.x, y);
                     pg.items.push(it);
                 }
-                for it in &row.on_top {
-                    let mut it = it.clone();
+                for t in &row.on_top {
+                    let mut it = t.item.clone();
                     it.translate(r.x, y);
                     top.push(it);
                 }

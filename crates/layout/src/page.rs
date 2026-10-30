@@ -311,8 +311,9 @@ impl PageBuilder<'_> {
     }
     pub(crate) fn new_page(&mut self, first_block: usize, body_top: f32) {
         self.apply_valign();
-        self.lift_on_top();
+        // Footnotes are text too: In Front of Text objects go over them.
         self.flush_notes();
+        self.lift_on_top();
         self.beneath = self.sect_beneath;
         self.excl.clear();
         // Floats placed above their anchors further down this page are known from its start.

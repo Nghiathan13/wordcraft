@@ -29,7 +29,26 @@ pub struct RowLayout {
     pub cells: Vec<CellPart>,
     /// In Front of Text objects anchored in its cells, relative like `items`: they go over all
     /// of the page's text, the rows and paragraphs after the table too (#1993).
-    pub on_top: Vec<Placed>,
+    pub on_top: Vec<OnTop>,
+}
+
+/// An In Front of Text object anchored in a table cell, which its table carries up to go over
+/// the rest of the page (#1993).
+#[derive(Clone)]
+pub struct OnTop {
+    /// The row's cell it's anchored in (for a nested table's, the cell holding that table).
+    pub(crate) cell: usize,
+    /// The top of its paragraph's first line, placed like the object: when the row splits, the
+    /// object goes with that line.
+    pub(crate) anchor: f32,
+    pub(crate) item: Placed,
+}
+
+impl OnTop {
+    pub(crate) fn translate(&mut self, dx: f32, dy: f32) {
+        self.anchor += dy;
+        self.item.translate(dx, dy);
+    }
 }
 
 /// A cell of a [`RowLayout`].
@@ -368,7 +387,7 @@ fn region_borders(parts: &[(TablePart, Borders)], (ri, nrows): (usize, usize), (
 struct CellBox {
     items: Vec<Placed>,
     /// In Front of Text objects anchored in the cell, placed like `items`.
-    on_top: Vec<Placed>,
+    on_top: Vec<OnTop>,
     h: f32,
     x: f32,
     w: f32,
@@ -638,7 +657,7 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
                 let BoxLayout { mut items, height, floats_bottom, on_top, .. } =
                     layout_box(ctx, BoxInput::cell(story, &cell.blocks, &cpath, len, text, depth));
                 // Turned text keeps its In Front of Text objects in the cell: they turn with it.
-                items.extend(on_top);
+                items.extend(on_top.into_iter().map(|t| t.item));
                 let across = height.max(floats_bottom);
                 turned = Some(Turned { turn, len, across, snap, region, ci, top: margins[0] + band_t });
                 (items, Vec::new(), len)
@@ -652,8 +671,11 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
                 } else {
                     collapsed = false;
                 }
-                for it in items.iter_mut().chain(on_top.iter_mut()) {
+                for it in &mut items {
                     it.translate(x0 + margins[1], margins[0] + band_t);
+                }
+                for t in &mut on_top {
+                    t.translate(x0 + margins[1], margins[0] + band_t);
                 }
                 // The cell grows to hold its floating tables.
                 (items, on_top, height.max(floats_bottom))
@@ -815,7 +837,10 @@ fn finish_table_rows(ctx: &mut Ctx, input: TableRows<'_>) -> TableLayout {
                     // Same list numbers as the first layout: lay it out from the same counters.
                     let now = (std::mem::replace(&mut ctx.counters, tn.snap.0), std::mem::replace(&mut ctx.eq_count, tn.snap.1));
                     let b = layout_box(ctx, BoxInput::cell(story, &cell.blocks, &cpath, len, text, depth));
-                    (cell_items, across) = (b.items, b.height.max(b.floats_bottom));
+                    across = b.height.max(b.floats_bottom);
+                    // Its In Front of Text objects turn with it, as in the first layout.
+                    cell_items = b.items;
+                    cell_items.extend(b.on_top.into_iter().map(|t| t.item));
                     (ctx.counters, ctx.eq_count) = now;
                 }
                 // Lines stack across the cell from its start edge (right for top-to-bottom text,
@@ -838,9 +863,9 @@ fn finish_table_rows(ctx: &mut Ctx, input: TableRows<'_>) -> TableLayout {
                 it.translate(0.0, dy);
                 items.push(it);
             }
-            for mut it in c.on_top {
-                it.translate(0.0, dy);
-                on_top.push(it);
+            for mut t in c.on_top {
+                t.translate(0.0, dy);
+                on_top.push(OnTop { cell: ci, ..t });
             }
             let b = c.borders;
             let (x0, x1, y0, y1) = (c.x, c.x + c.w, 0.0, rh);
@@ -1105,12 +1130,22 @@ pub fn split_row(row: &RowLayout, cut: f32) -> Option<(RowLayout, RowLayout)> {
         }
         parts.push(CellPart { top: c.top, items: start..b.len(), end: c.end.map(|e| e - shift) });
     }
+    // In Front of Text objects go with their paragraph's first line: on to the continuation when
+    // it moves on, with the rest of their cell.
+    let (mut top_a, mut top_b) = (Vec::new(), Vec::new());
+    for t in &row.on_top {
+        if t.anchor < moved.get(t.cell).copied().unwrap_or(f32::MAX) - 0.01 {
+            top_a.push(t.clone());
+        } else {
+            let mut t = t.clone();
+            t.translate(0.0, -shifts.get(t.cell).copied().unwrap_or(0.0));
+            top_b.push(t);
+        }
+    }
     // The part left on the page is placed and never split again.
     Some((
-        // In Front of Text objects stay with the part left on the page, where their paragraph
-        // starts, as floating objects do.
-        RowLayout { height: cut, items: a, bottom: row.bottom, edge: 0.0, cells: Vec::new(), on_top: row.on_top.clone() },
-        RowLayout { height, items: b, bottom: row.bottom, edge: row.edge, cells: parts, on_top: Vec::new() },
+        RowLayout { height: cut, items: a, bottom: row.bottom, edge: 0.0, cells: Vec::new(), on_top: top_a },
+        RowLayout { height, items: b, bottom: row.bottom, edge: row.edge, cells: parts, on_top: top_b },
     ))
 }
 

@@ -218,7 +218,7 @@ Imported Word 97–2003 `.doc`/`.dot` files now ask for a supported DOCX target 
 - 2026-10-15: Find opens Navigation on Results; editing the query restores Results after manual Headings/Pages navigation. Typed and selected-text searches retain document contents (#2096).
 
 | Date | What landed |
-| 2026-10-30 | Pictures and shapes set to In Front of Text are drawn over all of their page's text, as in Word: the paragraphs after the one they're anchored in, the tables below them and, for one in a table cell, the rows and paragraphs after its table showed through them (#1993) |
+| 2026-10-30 | Pictures and shapes set to In Front of Text are drawn over all of their page's text, as in Word: the paragraphs after the one they're anchored in, the tables below them, the footnotes and, for one in a table cell, the rows and paragraphs after its table; before, all of these were drawn over them (#1993) |
 | 2026-10-28 | **Arabic diacritic editing (#4757):** Backspace removes the last stored Arabic combining mark, so its base letter can stay while the mark is replaced. Caret movement and forward Delete keep their cluster rules. Synthetic command, history, protection and native/DOCX fresh-reopen checks; no native Word comparison or readiness change. |
 | 2026-10-29 | Insert › Shapes shows the basic shapes as a grid of code-drawn icon tiles, each with an accessible name and tooltip, instead of a text list (#4349) |
 | 2026-10-29 | Window sizing falls back to the screen rectangle when the reported inner size is invalid, and an Equation symbol tooltip no longer repeats a missing glyph's name or code point |
