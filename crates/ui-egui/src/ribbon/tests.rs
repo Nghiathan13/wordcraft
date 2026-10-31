@@ -256,6 +256,42 @@ fn change_list_level_tiles_name_mark_and_set_the_level() {
     assert_eq!(toggled(&h, 4), Some(egui::accesskit::Toggled::True), "the tile now marks level 4");
 }
 
+/// #2876 review: a list that defines fewer than nine levels (a file's can) gets a tile per level
+/// it defines, not one for a level whose paragraphs would have no label.
+#[test]
+fn change_list_level_shows_only_the_levels_the_list_defines() {
+    use egui_kittest::kittest::Queryable;
+    let mut app = WordApp::new(Session::new(wordcraft_doc::Document::from_text("One")), crate::Services::default());
+    app.run("para.numbering", json!({})).unwrap();
+    app.session.doc.numbering.abstracts.iter_mut().for_each(|a| a.levels.truncate(2));
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(vec2(260.0, 400.0))
+        .build_ui_state(|ui, app: &mut WordApp| super::home::list_level_tiles(ui, app), app);
+    h.run_steps(2);
+    for n in 1..=2 {
+        assert!(h.query_by_label(&format!("Level {n}")).is_some(), "Level {n} has a tile");
+    }
+    for n in 3..=9 {
+        assert!(h.query_by_label(&format!("Level {n}")).is_none(), "Level {n} isn't defined, so it has no tile");
+    }
+}
+
+/// #2876 review: a legal list's deepest label ("1.1.1.1.1.1.1.1.1.") gets the room it needs,
+/// inside its tile, wherever its level puts it.
+#[test]
+fn level_tile_labels_get_room_for_every_number() {
+    use wordcraft_doc::Align;
+    let tile = egui::Rect::from_min_size(egui::pos2(3.0, 3.0), vec2(194.0, 22.0));
+    let legal = "1.1.1.1.1.1.1.1.1.";
+    for (align, x) in [(Align::Left, 9.0), (Align::Left, 160.0), (Align::Center, 190.0), (Align::Right, 20.0)] {
+        let r = super::home::label_rect(legal, align, x, tile);
+        assert!(r.width() >= legal.len() as f32 * 7.5, "{align:?} at {x}: room for every number");
+        assert!(r.left() > tile.left() && r.right() < tile.right(), "{align:?} at {x}: inside the tile");
+    }
+    let bullet = super::home::label_rect("•", Align::Left, 9.0, tile);
+    assert_eq!((bullet.left(), bullet.width()), (9.0, 18.0), "a bullet keeps its place and size");
+}
+
 /// #860 review: a tag the language list doesn't have shows by language and region, not as
 /// the tag; Portuguese (Angola) isn't Brazil's, and no name shows twice in the menu.
 #[test]

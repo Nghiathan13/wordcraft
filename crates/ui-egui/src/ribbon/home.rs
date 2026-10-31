@@ -39,9 +39,10 @@ fn bullet_list_items(ui: &mut Ui, app: &mut WordApp) {
     mi(ui, app, "Define New Bullet…", "ui.dialog", json!({"name": "defineBullet"}));
 }
 
-/// Change List Level ›: a tile per level of the caret's list, its bullet or number at its
+/// Change List Level ›: a tile per level the caret's list defines, its bullet or number at its
 /// aligned-at position and a grey line from its text indent, each level further in; the
-/// caret's level is marked. A click runs `para.listLevel`.
+/// caret's level is marked. A click runs `para.listLevel`. A level the list doesn't define has no
+/// tile: a paragraph moved there would lose its label.
 pub(super) fn list_level_tiles(ui: &mut Ui, app: &mut WordApp) {
     use wordcraft_doc::numbering::{Counters, LevelSuffix};
     let t = Tokens::get(ui.ctx());
@@ -50,28 +51,28 @@ pub(super) fn list_level_tiles(ui: &mut Ui, app: &mut WordApp) {
     let Some(n) = doc.para_at(&app.session.sel.focus).and_then(|p| p.props.numbering).filter(|n| n.num != 0) else { return };
     // (label and its formatting, alignment, aligned-at and text positions in points) per level.
     let levels: Vec<_> = (0..9u8)
-        .map(|k| {
-            let def = doc.numbering.level(n.num, k).cloned().unwrap_or_default();
+        .filter_map(|k| {
+            let def = doc.numbering.level(n.num, k)?.clone();
             // Every level above at its start value, as the Define dialogs' previews show it.
             let label = Counters::default().next_label(&doc.numbering, n.num, k).map(|(s, _)| s).filter(|s| !s.trim().is_empty());
             let at = (def.indent - def.hanging).max(0.0);
             // The label fits its tile whatever size the level gives it.
             let chr = wordcraft_doc::CharProps { size: None, ..def.chr.clone() };
-            (label, chr, def.align, at, def.indent.max(0.0), def.suffix)
+            Some((k, label, chr, def.align, at, def.indent.max(0.0), def.suffix))
         })
         .collect();
     let enabled = crate::widgets::enabled(app, "para.listLevel");
     let (w, h) = (200.0, 28.0);
     // Scaled so the deepest level still has room for its line.
-    let deepest = levels.iter().map(|l| l.3).fold(0.0f32, f32::max);
+    let deepest = levels.iter().map(|l| l.4).fold(0.0f32, f32::max);
     let scale = if deepest > 0.0 { ((w - 64.0) / deepest).min(0.6) } else { 0.6 };
     let page = crate::previews::preview_tint(&t, false);
     let ink = |g: u8| egui::Color32::from_gray(((g as u16 * page.r() as u16) / 255) as u8);
     ui.spacing_mut().item_spacing.y = 1.0;
-    for (k, (label, chr, align, at, text_at, suffix)) in levels.into_iter().enumerate() {
+    for (k, label, chr, align, at, text_at, suffix) in levels {
         let name = format!("{} {}", tl!("Level"), k + 1);
         let (outer, resp) = ui.allocate_exact_size(vec2(w, h), if enabled { Sense::click() } else { Sense::hover() });
-        let on = k == n.level as usize;
+        let on = k == n.level;
         resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, enabled, on, &name));
         if on {
             ui.painter().rect(outer, 3.0, t.checked, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
@@ -86,15 +87,7 @@ pub(super) fn list_level_tiles(ui: &mut Ui, app: &mut WordApp) {
         let x = x_of(at);
         let mut text_x = left;
         if let Some(label) = label {
-            let glyph = 18.0;
-            // Bullets are one character; a number gets room for its digits and punctuation.
-            let gw = (label.chars().count() as f32 * 7.5).clamp(glyph, 48.0);
-            let gx = match align {
-                wordcraft_doc::Align::Center => x - gw / 2.0,
-                wordcraft_doc::Align::Right => x - gw,
-                _ => x,
-            };
-            let r = Rect::from_min_size(pos2(gx.max(tile.left() + 1.0), y - glyph / 2.0), vec2(gw, glyph));
+            let r = label_rect(&label, align, x, tile);
             crate::previews::glyph(app, ui, r, &label, &chr, page);
             text_x = match suffix {
                 LevelSuffix::Tab => x_of(text_at).max(r.right() + 2.0),
@@ -111,6 +104,21 @@ pub(super) fn list_level_tiles(ui: &mut Ui, app: &mut WordApp) {
             ui.close();
         }
     }
+}
+
+/// Where a level tile draws its label, aligned at `x`. Bullets are one character; a number gets
+/// room for its digits and punctuation, a legal list's deep levels too ("1.1.1.1.1."), moved in
+/// from the tile's right edge so all of it shows.
+pub(super) fn label_rect(label: &str, align: wordcraft_doc::Align, x: f32, tile: Rect) -> Rect {
+    let glyph = 18.0;
+    let (min, max) = (tile.left() + 1.0, tile.right() - 6.0);
+    let gw = (label.chars().count() as f32 * 7.5).max(glyph).min(max - min);
+    let gx = match align {
+        wordcraft_doc::Align::Center => x - gw / 2.0,
+        wordcraft_doc::Align::Right => x - gw,
+        _ => x,
+    };
+    Rect::from_min_size(pos2(gx.min(max - gw).max(min), tile.center().y - glyph / 2.0), vec2(gw, glyph))
 }
 
 pub(super) fn home(app: &mut WordApp, ui: &mut Ui) {
