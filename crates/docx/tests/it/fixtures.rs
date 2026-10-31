@@ -797,7 +797,7 @@ fn a_table_without_a_style_takes_the_default_table_style() {
     let read = |styles: &str, tbl_style: &str| {
         let styles = format!("<w:styles {W_NS}>{styles}</w:styles>");
         let body = format!(
-            r#"<w:tbl><w:tblPr>{tbl_style}<w:tblLook w:firstRow="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl><w:p/>"#
+            r#"<w:tbl><w:tblPr>{tbl_style}</w:tblPr><w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl><w:p/>"#
         );
         wordcraft_docx::read(&docx(&body, &[("rId1", "styles", "styles.xml")], &[("word/styles.xml", &styles)])).unwrap()
     };
@@ -808,13 +808,29 @@ fn a_table_without_a_style_takes_the_default_table_style() {
         (ruled("Rule", "0"), "", None),
         (format!("{}{}", ruled("Rule", "1"), ruled("Other", "0")), r#"<w:tblStyle w:val="Other"/>"#, Some("Other")),
         (normal.to_string(), "", None),
-        // A Normal Table with formatting of its own formats the tables.
+        // A Normal Table with formatting of its own, or from the style it is based on, formats the
+        // tables.
         (ruled("TableNormal", "1"), "", Some("TableNormal")),
+        (
+            format!(
+                r#"{}<w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:basedOn w:val="Rule"/></w:style>"#,
+                ruled("Rule", "0")
+            ),
+            "",
+            Some("TableNormal"),
+        ),
         // An id too long to copy into every table is not given to them.
         (ruled(&"L".repeat(300), "1"), "", None),
     ] {
         assert_eq!(style(&read(&styles, tbl_style)).as_deref(), want, "{tbl_style} {styles}");
     }
+    // With no `w:tblLook` the header row is on, as Word draws it: the table gets the style's
+    // header row rule and bottom alignment.
+    let d = read(&ruled("Rule", "1"), "");
+    let head = d.styles.table_style("Rule").unwrap().part(wordcraft_doc::styles::TablePart::FirstRow);
+    assert!(d.body[0].as_table().unwrap().props.look.header_row);
+    assert_eq!(head.v_align, Some(wordcraft_doc::props::VAlign::Bottom));
+    assert!(head.borders.and_then(|b| b.bottom).is_some_and(|b| b.style == BorderStyle::Single));
     // A save keeps the style and the file's default flag (`on` included); the plain Normal Table
     // that saving writes as the default still leaves the table unstyled.
     let back = wordcraft_docx::read(&wordcraft_docx::write(&read(&ruled("Rule", "on"), "")).unwrap()).unwrap();
