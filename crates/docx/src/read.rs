@@ -110,8 +110,8 @@ pub(crate) struct Reader<'p> {
     pub theme_fills: shape_style::ThemeFills,
     /// The fill of the group being read (what its members' `a:grpFill` stands for).
     pub group_fill: Option<wordcraft_doc::fill::Fill>,
-    /// The styles part's default table style (`w:type="table" w:default="1"`), which a table
-    /// without `w:tblStyle` is formatted with (ECMA-376 §17.4.63, #5056).
+    /// The styles part's default table style (`w:type="table" w:default="1"`), which formats a
+    /// table without `w:tblStyle` (#5056). `None` for Normal Table.
     pub default_table_style: Option<String>,
 }
 

@@ -186,10 +186,9 @@ impl Reader<'_> {
         if !sheet.styles.iter().any(|s| s.quick) {
             sheet.add_default_gallery();
         }
-        // Tables that name no style take the default table style, as in Word (#5056). The
-        // `default` flag above isn't it: the writer flags `TableNormal` by its id. Word's usual
-        // default, Normal Table, is what a table with no style already is here (and what saving
-        // writes as the default), so only another default is given to the tables.
+        // A table with no `w:tblStyle` takes the default table style, as in Word (#5056); the
+        // `default` flag above leaves `TableNormal` out. Normal Table is skipped: an unstyled
+        // table is that already, and saving writes it as the default.
         self.default_table_style = root
             .children("w:style")
             .take(10_000)

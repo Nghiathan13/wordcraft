@@ -279,7 +279,7 @@ Custom document properties retain their bookmark link targets through DOCX saves
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-31 | trivial | DOCX: a table without `w:tblStyle` takes the styles part's default table style (other than Normal Table), as Word does: an exam header table gets its default style's header row rule and bottom-aligned cells (#5056, `default_table_style`) |
+| 2026-10-31 | trivial | DOCX: a table without `w:tblStyle` takes the styles part's default table style (other than Normal Table), as Word does: an exam header table gets its default style's header row rule and bottom-aligned cells (#5056, `docx` `default_table_style`) |
 | 2026-10-28 | trivial | Preserve custom-property bookmark link targets through saves, value edits and dialog renames (#4767); no linked-value evaluation or readiness change |
 | 2026-10-28 | trivial | Note conversion preserves content with an ordered reference/run walk, #4750; readiness estimates unchanged. |
 | 2026-10-29 | trivial | DOCX comment IDs use ordered paragraph lookup and one durable-ID reservation set; threading and ID rules unchanged |

@@ -1,6 +1,6 @@
-//! #5056: a table without `w:tblStyle` is formatted with the styles part's default table style
-//! (ECMA-376 §17.4.63). Word for Windows, opening such a file, reports that style as the table's
-//! `Style` and draws its header row part: a bottom border and bottom-aligned cells.
+//! #5056: a table without `w:tblStyle` is formatted with the styles part's default table style.
+//! Word for Windows, opening such a file, reports that style as the table's `Style` and draws its
+//! header row part: a bottom border and bottom-aligned cells.
 use std::io::Write;
 use wordcraft_doc::props::VAlign;
 use wordcraft_doc::styles::TablePart;
