@@ -1,5 +1,6 @@
 mod comment_ids;
 mod date_fields;
+mod default_table_style;
 mod macro_packages;
 #[cfg(not(target_arch = "wasm32"))]
 mod odt_sections;

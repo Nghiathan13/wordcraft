@@ -186,6 +186,17 @@ impl Reader<'_> {
         if !sheet.styles.iter().any(|s| s.quick) {
             sheet.add_default_gallery();
         }
+        // Tables that name no style take the default table style, as in Word (#5056). The
+        // `default` flag above isn't it: the writer flags `TableNormal` by its id. Word's usual
+        // default, Normal Table, is what a table with no style already is here (and what saving
+        // writes as the default), so only another default is given to the tables.
+        self.default_table_style = root
+            .children("w:style")
+            .take(10_000)
+            .find(|s| s.attr("w:type") == Some("table") && s.attr("w:default").is_some_and(|v| matches!(v.trim(), "1" | "true" | "on")))
+            .and_then(|s| s.attr("w:styleId"))
+            .map(|id| self.pc.style_id(id))
+            .filter(|id| id != "TableNormal" && sheet.styles.iter().any(|s| s.id == *id && s.kind == StyleKind::Table));
         self.doc.styles = sheet;
         Ok(())
     }

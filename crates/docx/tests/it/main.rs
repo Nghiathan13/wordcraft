@@ -9,6 +9,7 @@ mod content_control_save_cost;
 mod content_controls;
 mod custom_xml;
 mod default_size;
+mod default_table_style;
 mod drawing_payload;
 mod east_asian_lang;
 mod east_asian_layout;
